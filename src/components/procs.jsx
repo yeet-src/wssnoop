@@ -6,7 +6,7 @@
 // time. Only switches the kernel emitted are counted, so sub-`min-slice` tasks
 // don't show — it tracks CPU hogs, not every wakeup.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { heat, lpad, pad } from "@/lib/format.js";
+import { heat, lpad, pad } from "../lib/format.js";
 
 const NAMEW = 15; // command column width
 const PCTW = 7; // "100.0%" + a space

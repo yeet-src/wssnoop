@@ -3,7 +3,7 @@
 // tinted as the rail via the container's own bg — full width, no fragile
 // space-fill.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { fmtDuration, fmtRate } from "@/lib/format.js";
+import { fmtDuration, fmtRate } from "../lib/format.js";
 
 const RAIL = idx(235);
 

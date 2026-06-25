@@ -1,5 +1,5 @@
 // Pure presentation helpers — strings and color, no signals or BPF.
-// Imported by the components through the `@/` alias (resolved at bundle time).
+// Imported by the components by relative path.
 import { idx } from "yeet:tui";
 
 export const pad = (s, n) => (s + " ".repeat(n)).slice(0, n);

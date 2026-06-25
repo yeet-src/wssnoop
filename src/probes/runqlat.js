@@ -4,7 +4,7 @@
 // in contrast to cpusched's ring-buffer stream.
 import { ArrayMap } from "yeet:bpf";
 import { from } from "yeet:tui";
-import { control } from "@/probes/probe.js";
+import { control } from "./probe.js";
 
 export const SLOTS = 27; // must match MAX_SLOTS in runqlat.bpf.c
 const POLL_MS = 500;

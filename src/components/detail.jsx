@@ -1,7 +1,7 @@
 // The selected CPU's recent context switches, streamed live: prev -> next
 // with the outgoing task's on-CPU slice. Reads `cpus` + `selected`.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { fmtDuration, lpad, pad } from "@/lib/format.js";
+import { fmtDuration, lpad, pad } from "../lib/format.js";
 
 export default ({ cpus, selected, rows }) => (
   <Box>

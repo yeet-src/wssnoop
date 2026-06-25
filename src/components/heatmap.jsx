@@ -5,7 +5,7 @@
 // layout: it renders the most recent `gridCols` of history and, when there
 // are more cores than rows, windows the list to keep the selection in view.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { heat } from "@/lib/format.js";
+import { heat } from "../lib/format.js";
 
 const HEADER = "  cores × time   (newest → right)   brightness = switch rate";
 

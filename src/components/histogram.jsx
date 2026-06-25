@@ -2,7 +2,7 @@
 // (cumulative counts per bucket) and draws a bar per bucket, the label
 // being the bucket's lower bound.
 import { Box, Text, fg, idx } from "yeet:tui";
-import { fmtDuration, lpad } from "@/lib/format.js";
+import { fmtDuration, lpad } from "../lib/format.js";
 
 const LO = 8; // 2^8 ns = 256ns
 const HI = 23; // 2^23 ns ≈ 8.4ms

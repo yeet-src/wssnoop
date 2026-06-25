@@ -12,7 +12,7 @@
 import { DataSec, RingBuf } from "yeet:bpf";
 import { from, signal } from "yeet:tui";
 import { _ } from "yeet:helpers";
-import { control, numCpus } from "@/probes/probe.js";
+import { control, numCpus } from "./probe.js";
 
 const WINDOW_MS = 500; // rate window
 const FEED = 64; // recent switches kept per CPU
