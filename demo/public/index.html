@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wssnoop demo — Polymarket live feed</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #2a313c; --ink: #e6edf3;
+    --dim: #8b949e; --accent: #58a6ff; --up: #3fb950; --down: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg); color: var(--ink);
+  }
+  header {
+    padding: 12px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  #status { margin-left: auto; font-size: 12px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--down); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--up); }
+  .wrap { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 1px;
+    background: var(--line); height: calc(100vh - 54px); }
+  .col { background: var(--bg); overflow-y: auto; }
+  .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--dim); margin: 0; padding: 12px 16px; position: sticky; top: 0;
+    background: var(--bg); border-bottom: 1px solid var(--line); z-index: 1; }
+  .market { padding: 10px 16px; border-bottom: 1px solid var(--line);
+    cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
+  .market:hover { background: var(--panel); }
+  .market input { margin-top: 3px; accent-color: var(--accent); }
+  .market .q { flex: 1; }
+  .market.sub { background: #11202f; }
+  .q .qt { font-size: 13px; }
+  .q .px { color: var(--dim); font-size: 11px; margin-top: 2px; }
+  .feed { padding: 0; }
+  .row { display: grid; grid-template-columns: 66px 86px 120px 1fr auto;
+    gap: 12px; padding: 5px 16px; border-bottom: 1px solid #1b2129;
+    font-size: 12.5px; white-space: nowrap; animation: flash .6s; }
+  @keyframes flash { from { background: #1d3050; } to { background: transparent; } }
+  .row .src { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    align-self: center; padding: 1px 6px; border-radius: 3px; text-align: center; }
+  .row .src.poly { background: #2d2140; color: #c9a6ff; }
+  .row .src.coinbase { background: #0e2a3a; color: #52b6f0; }
+  .row .type { color: var(--accent); }
+  .row .name { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  .row .px { text-align: right; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .meta { padding: 10px 16px; color: var(--dim); font-size: 11px;
+    border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>wssnoop demo</h1>
+  <span class="sub">VM → two <code>wss://</code> sources (the snoop targets): <code>polymarket</code> + <code>coinbase</code></span>
+  <span id="status"><span class="dot"></span><span id="statustext">connecting…</span></span>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <h2>Polymarket markets — toggle to (un)subscribe</h2>
+    <div class="meta" id="catalogmeta">loading catalog…</div>
+    <div id="markets"></div>
+    <h2>Coinbase tickers — toggle to (un)subscribe</h2>
+    <div class="meta" id="coinbasemeta">loading products…</div>
+    <div id="coinbase"></div>
+  </div>
+  <div class="col">
+    <h2>Live stream — both sources</h2>
+    <div class="meta" id="feedmeta">no events yet</div>
+    <div class="feed" id="feed"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const tokenName = new Map();   // tokenId -> "Question · Outcome"
+const subscribed = new Set();  // tokenIds the browser has asked for
+let feedCount = 0;
+
+const proto = location.protocol === "https:" ? "wss:" : "ws:";
+let ws;
+
+function connect() {
+  ws = new WebSocket(`${proto}//${location.host}/stream`);
+  ws.onopen = () => setStatus(true, "connected to backend");
+  ws.onclose = () => { setStatus(false, "disconnected — retrying"); setTimeout(connect, 1500); };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+}
+
+function setStatus(on, text) {
+  $("status").firstElementChild.classList.toggle("on", on);
+  $("statustext").textContent = text;
+}
+
+function handle(msg) {
+  if (msg.kind === "init") { initCatalog(msg); initCoinbase(msg); return; }
+  if (msg.kind === "poly") return renderEvent(msg.event);
+  if (msg.kind === "coinbase") return renderTicker(msg.event);
+}
+
+// One row builder for both sources — keeps the 5-column layout in one place.
+function addRow(source, type, name, detail, px, cls) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML =
+    `<span class="src ${source}">${source}</span>` +
+    `<span class="type"></span><span class="name"></span>` +
+    `<span class="detail"></span><span class="px ${cls || ""}"></span>`;
+  row.children[1].textContent = type;
+  row.children[2].textContent = name;
+  row.children[3].textContent = detail;
+  row.children[4].textContent = px || "";
+  const feed = $("feed");
+  feed.prepend(row);
+  while (feed.childElementCount > 250) feed.lastElementChild.remove();
+  $("feedmeta").textContent = `${++feedCount} events · ${feed.childElementCount} shown`;
+}
+
+function initCatalog({ markets, active }) {
+  active.forEach((id) => subscribed.add(id));
+  const wrap = $("markets");
+  wrap.innerHTML = "";
+  markets.forEach((m) => {
+    const div = document.createElement("div");
+    div.className = "market";
+    const ids = m.tokens.map((t) => t.tokenId);
+    m.tokens.forEach((t) => tokenName.set(t.tokenId, `${m.question} · ${t.outcome}`));
+    const checked = ids.some((id) => subscribed.has(id));
+    div.innerHTML =
+      `<input type="checkbox" ${checked ? "checked" : ""}>` +
+      `<div class="q"><div class="qt"></div>` +
+      `<div class="px">${m.tokens.map((t) => t.outcome).join(" / ")}</div></div>`;
+    div.querySelector(".qt").textContent = m.question;
+    const cb = div.querySelector("input");
+    const toggle = (e) => {
+      if (e.target !== cb) cb.checked = !cb.checked;
+      const action = cb.checked ? "subscribe" : "unsubscribe";
+      ids.forEach((id) => cb.checked ? subscribed.add(id) : subscribed.delete(id));
+      div.classList.toggle("sub", cb.checked);
+      ws.send(JSON.stringify({ action, assetIds: ids }));
+    };
+    div.onclick = toggle;
+    div.classList.toggle("sub", checked);
+    wrap.appendChild(div);
+  });
+  $("catalogmeta").textContent = `${markets.length} active markets · check a box to send a subscribe frame on the wss:// link`;
+}
+
+function renderEvent(ev) {
+  const type = ev.event_type || ev.type || "?";
+  // price_change carries its asset(s) inside the changes array, not at top level.
+  const ch0 = (ev.price_changes || ev.changes || [])[0] || {};
+  const asset = ev.asset_id || ev.token_id || ch0.asset_id || (ev.market ?? "");
+  const name = tokenName.get(asset) || (asset ? asset.slice(0, 10) + "…" : "—");
+
+  let detail = "", px = "", cls = "";
+  if (type === "book") {
+    const bid = topPrice(ev.bids, true), ask = topPrice(ev.asks, false);
+    detail = `book  bid ${bid}  ask ${ask}`;
+  } else if (type === "price_change") {
+    const n = (ev.price_changes || ev.changes || []).length;
+    detail = `${ch0.side || ""} ${ch0.size || ""} @ ${ch0.price || ""}` +
+      (n > 1 ? `  (+${n - 1} more)` : "");
+    px = ch0.price || "";
+    cls = ch0.side === "BUY" ? "up" : ch0.side === "SELL" ? "down" : "";
+  } else if (type === "last_trade_price") {
+    detail = `trade ${ev.size || ""} @ ${ev.price}`;
+    px = ev.price; cls = ev.side === "BUY" ? "up" : ev.side === "SELL" ? "down" : "";
+  } else {
+    detail = JSON.stringify(rest(ev)).slice(0, 80);
+  }
+  addRow("poly", type, name, detail, px, cls);
+}
+
+// Coinbase ticker payload: { type:"ticker", product_id, price, last_size, side, ... }
+function renderTicker(t) {
+  const cls = t.side === "buy" ? "up" : t.side === "sell" ? "down" : "";
+  const size = t.last_size ? (+t.last_size).toPrecision(4) : "";
+  addRow("coinbase", "ticker", t.product_id, `${(t.side || "").toUpperCase()} ${size}`, t.price, cls);
+}
+
+function initCoinbase({ coinbaseProducts = [], coinbaseActive = [] }) {
+  const active = new Set(coinbaseActive);
+  const wrap = $("coinbase");
+  wrap.innerHTML = "";
+  coinbaseProducts.forEach((prod) => {
+    const div = document.createElement("div");
+    div.className = "market";
+    const checked = active.has(prod);
+    div.innerHTML =
+      `<input type="checkbox" ${checked ? "checked" : ""}>` +
+      `<div class="q"><div class="qt">${prod}</div>` +
+      `<div class="px">ticker channel</div></div>`;
+    const cb = div.querySelector("input");
+    div.onclick = (e) => {
+      if (e.target !== cb) cb.checked = !cb.checked;
+      const action = cb.checked ? "subscribe" : "unsubscribe";
+      div.classList.toggle("sub", cb.checked);
+      ws.send(JSON.stringify({ action, source: "coinbase", assetIds: [prod] }));
+    };
+    div.classList.toggle("sub", checked);
+    wrap.appendChild(div);
+  });
+  $("coinbasemeta").textContent =
+    `${coinbaseProducts.length} products · check a box to send a subscribe frame on the coinbase wss:// link`;
+}
+
+const topPrice = (levels, isBid) => {
+  if (!Array.isArray(levels) || !levels.length) return "—";
+  const sorted = [...levels].sort((a, b) =>
+    isBid ? b.price - a.price : a.price - b.price);
+  return sorted[0].price;
+};
+const rest = (ev) => {
+  const { event_type, type, asset_id, token_id, market, ...r } = ev;
+  return r;
+};
+
+connect();
+</script>
+</body>
+</html>

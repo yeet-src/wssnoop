@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "wssnoop — a yeet script.",
+  "description": "Decode the WebSocket traffic riding inside a process's TLS connections, by tapping the plaintext at the OpenSSL boundary with eBPF.",
   "dependencies": {}
 }
