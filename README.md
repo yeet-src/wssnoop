@@ -116,7 +116,7 @@ multi-connection, bidirectional traffic immediately.
 ### Attaching to your own process
 
 ```sh
-yeet run src/main.jsx -- --pid <pid> --bin <ssl-binary> [--secs N]
+yeet run src/main.jsx -- --pid <pid> [--bin <ssl-binary>] [--secs N]
 ```
 
 `--bin` is **where the `SSL_*` symbols live**:
@@ -124,6 +124,11 @@ yeet run src/main.jsx -- --pid <pid> --bin <ssl-binary> [--secs N]
 - a shared **`libssl.so`** when the target links OpenSSL dynamically, or
 - an **absolute path to a statically-linked executable** (e.g. nvm/official
   Node bakes OpenSSL in — probe the `node` binary itself).
+
+`--bin` is **optional** — omit it and wssnoop discovers the target from the
+process graph: a bare program name (`--bin node`) resolves to that program's
+exe, and `--pid N` alone finds that process's mapped `libssl` (or its exe for
+static SSL). Pass an explicit path/library to override. To resolve by hand:
 
 ```sh
 readlink /proc/<pid>/exe                            # the executable
@@ -134,16 +139,17 @@ With no `--pid`, every process mapping `--bin` is traced (this is how the demo
 sees all three workers at once) — but note a `--bin`-only attach hooks the
 processes that exist *at attach time*, so start the targets first.
 
-Keys: `/` search, `q` / `Ctrl-C` quit, `Esc` backs out (clear filter → close
-inspector → quit). Everything else is mouse-driven; hover any control for help
-in the minibuffer.
+Keys: `/` search · `s` sort · `r` role · `i` idle rows · `a` rows-per-process ·
+`[` / `]` activity window · `q` / `Ctrl-C` quit · `Esc` backs out (clear filter
+→ close inspector → quit). Everything else is mouse-driven; hover any control
+for help (and its shortcut) in the minibuffer.
 
 ## Notes / limits
 
 - **Mid-stream attach** shows `?` for role/dest until the connection reconnects
   with a fresh handshake (OpenSSL reuses `SSL*` addresses; a new handshake
   resets the stream). The demo workers recycle connections so this self-heals.
-- **16 KB capture cap per SSL call** (`CHUNK` in `wssnoop.bpf.c`). One TLS
+- **4 KB capture cap per SSL call** (`CHUNK` in `wssnoop.bpf.c`). One TLS
   record maxes near this; a larger coalesced read is reported as truncated
   rather than emitting garbage.
 - Hooks `SSL_read` / `SSL_write` (not the `_ex` variants). Stripped static
