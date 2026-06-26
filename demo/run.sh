@@ -34,7 +34,11 @@ COMMANDS
   attach           start the workers AND launch wssnoop attached to them
   docker           run workers INSIDE a docker container and attach wssnoop to
                    it — demonstrates the container nesting tier (needs docker)
-  stop             stop all demo workers (and the demo container)
+  stop             stop the demo workers (and the demo container) — leaves any
+                   running wssnoop alone
+  reap             kill leftover wssnoop isolates from a crashed terminal
+                   (NB: also kills a wssnoop you're actively viewing — quit that
+                   with `q`, not this)
   status           show which workers are running
   help             show this help (also shown with no command)
 
@@ -61,7 +65,7 @@ ABRUPT="${ABRUPT:-}"
 set_cmd() { [[ -z "$CMD" ]] || { echo "conflicting commands: $CMD and $1" >&2; exit 2; }; CMD="$1"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    start|attach|docker|stop|status) set_cmd "$1" ;;
+    start|attach|docker|stop|status|reap) set_cmd "$1" ;;
     help|--help|-h) CMD="help"; break ;;
     --recycle)    RECYCLE="$2"; shift ;;
     --recycle=*)  RECYCLE="${1#*=}" ;;
@@ -87,20 +91,24 @@ have_docker() {
   return 1
 }
 
-# Reap stale wssnoop isolates. `yeet run` outlives its client: closing the
-# terminal (or killing it) leaves the daemon-side isolate running its BPF tap,
-# and those zombies starve a fresh attach until it hangs at "starting…". `yeet
-# ps`/`yeet kill` clears any left from a prior run, so each attach starts clean.
+# Reap *stale* wssnoop isolates: `yeet run` outlives its client, so a
+# force-closed terminal (Ctrl-C the terminal, not `q`) can leave a daemon-side
+# isolate running its BPF tap; the zombie then starves a fresh attach until it
+# hangs at "starting…". This is EXPLICIT only (the `reap` command) — it can't
+# tell a zombie from a live viewer, so we never run it from stop/start/attach,
+# which would kill the wssnoop you're watching. Normal teardown is `q`.
 reap_jails() {
   "$YEET" ps 2>/dev/null \
     | awk 'NR>1 && $1 ~ /^[0-9]+$/ && /main\.jsx/ { print $1 }' \
-    | while read -r id; do "$YEET" kill "$id" >/dev/null 2>&1 || true; done
+    | while read -r id; do echo ">> killing wssnoop isolate $id"; "$YEET" kill "$id" >/dev/null 2>&1 || true; done
 }
 
+# Stop only the demo TRAFFIC — the worker processes and the demo container. It
+# deliberately does NOT touch wssnoop isolates (that's the user's viewer; quit
+# it with `q`). Use `reap` to clear a leftover viewer from a crashed terminal.
 stop() {
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   pkill -f "worker.mjs" 2>/dev/null || true
-  reap_jails
   if have_docker; then $DKR rm -f "$CTR_NAME" >/dev/null 2>&1 || true; fi
 }
 
@@ -154,6 +162,7 @@ case "$CMD" in
   ""|help) usage; exit 0 ;;
   status)  status; exit 0 ;;
   stop)    stop; echo "stopped demo workers"; exit 0 ;;
+  reap)    reap_jails; echo "reaped leftover wssnoop isolates"; exit 0 ;;
 esac
 
 # --- docker (containerized workers; no host node needed) ---------------------
