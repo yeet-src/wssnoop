@@ -12,7 +12,7 @@ import { Box, Text, face } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
 import { COL, roleColor } from "./palette.js";
-import { INDENT, W_ROLE, W_DEST, W_MSG, GAP, LEFT } from "./columns.js";
+import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
 import { tip, inspect } from "../controls.js";
 
 const roleTip = (c) =>
@@ -22,7 +22,7 @@ const roleTip = (c) =>
       ? "role: server — this process is serving the connection"
       : "role: unknown — attached mid-stream (no handshake seen)";
 
-export default function Row({ conn, now, span, width, order, visible }) {
+export default function Row({ conn, now, span, geom, order, visible }) {
   return (
     <Box
       direction="row"
@@ -35,12 +35,12 @@ export default function Row({ conn, now, span, width, order, visible }) {
       }}
       {...tip(() => `connection #${conn.conn} — click to inspect its messages`)}
     >
-      <Box width={LEFT} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
+      <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
         <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>
           {/* role colour is per-value, so a runtime face() patch, not a static attr */}
           <Text>{() => (now.get(), face({ fg: roleColor(conn.role) })(conn.role))}</Text>
         </Box>
-        <Box width={W_DEST} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
+        <Box width={geom.dest} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
           <Text fg={COL.dim}>{() => (now.get(), conn.dest)}</Text>
         </Box>
         <Box
@@ -53,7 +53,8 @@ export default function Row({ conn, now, span, width, order, visible }) {
           </Text>
         </Box>
       </Box>
-      <Sparkline hist={conn.hist} now={now} span={span} width={width} variant="conn" />
+      <Box width={HANDLE} break="none" />
+      <Sparkline hist={conn.hist} now={now} span={span} width={geom.spark} variant="conn" />
     </Box>
   );
 }

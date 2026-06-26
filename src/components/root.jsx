@@ -17,8 +17,11 @@ import Inspector from "./inspector.jsx";
 import Minibuffer from "./minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
 import { COL } from "./palette.js";
-import { sparkWidth } from "./columns.js";
-import { vizRange, sortKey, filters, selected, search, matches, isInspecting } from "../controls.js";
+import { layout, START, DEST_MIN } from "./columns.js";
+import {
+  vizRange, sortKey, filters, selected, search, matches, isInspecting,
+  destWidth, dragging, endColDrag,
+} from "../controls.js";
 import { groupMetric, rankMap } from "../lib/rank.js";
 import { procInfo } from "../probes/procinfo.js";
 
@@ -35,7 +38,10 @@ export default function Root({ size, groups, global, stats, status, clock }) {
            * per tick). activeOnly is time-varying, so it's applied per-row in
            * the group instead. */
           const role = filters.get().role;
-          const width = sparkWidth(size.get().cols);
+          /* Reading destWidth here (not just cols) means a header drag re-flows
+           * the table — the sparkline's CellBuffer is sized at build time, so a
+           * width change has to rebuild the row, same as a resize does. */
+          const geom = layout(size.get().cols, destWidth.get());
           /* Free-text targets messages while the inspector is open, so it only
            * narrows the table when the inspector is closed. */
           const q = isInspecting() ? "" : search.get();
@@ -75,13 +81,28 @@ export default function Root({ size, groups, global, stats, status, clock }) {
               conns={conns}
               now={clock}
               span={vizRange}
-              width={width}
+              geom={geom}
               order={() => groupRank.get().get(g.pid) ?? 0}
             />
           ));
         }}
         </Box>
         {() => (selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null)}
+        {/* While dragging the column handle, a transparent full-screen lid
+            tracks the pointer anywhere on screen (it needn't stay on the 1-cell
+            handle) and ends the drag on release. */}
+        {() =>
+          dragging.get() ? (
+            <Box
+              width="1fr"
+              height="1fr"
+              z={2}
+              onMouseMove={(e) => destWidth.set(Math.max(DEST_MIN, e.clientX - START))}
+              onMouseUp={endColDrag}
+              onMouseLeave={endColDrag}
+            />
+          ) : null
+        }
        </Layer>
       </Box>
       <SearchBar />

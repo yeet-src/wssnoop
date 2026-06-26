@@ -90,6 +90,27 @@ reality · **[uncatchable]** can't be handled from JS.
 - **Suggested fix:** Measure container intrinsics with the same `displayWidth`
   the renderer paints with, so slot width == painted width.
 
+### 20. A `CellBuffer` is not occluded by boxes drawn over it **[silent]**
+- **Symptom:** An opaque, higher-`z` `Box` (with `bg` + `border`) placed over a
+  `CellBuffer` does **not** hide it — the buffer's glyphs bleed through the
+  panel's empty cells. An overlay panel laid over a sparkline shows the bars
+  *interleaved with the panel's own text* (`▀▀⊙ focus▀▀● live`). Reproduced
+  minimally: a `bg:"#11161f"` bordered box over a `▀`-filled buffer renders
+  `│OPAQUE PANEL▀▀▀▀▀▀│` — the border + text win, the interior bg does not.
+- **Cause:** The renderer composites `CellBuffer` planes in a pass that a box's
+  background fill doesn't clear. The rule observed: a **non-space glyph** at
+  higher z wins (panel text occludes), but a **space** at higher z is treated as
+  transparent, so the buffer's glyph below shows through. A `bg` color is not a
+  glyph, so it never occludes the buffer.
+- **Workaround:** Don't rely on z-order to hide a buffer. Blank the buffer
+  itself (write `0x20` spaces) when it should be hidden — e.g. wssnoop blanks the
+  table's row/group sparklines while the inspector overlay is open, keeping only
+  the toolbar's bar (which is never covered). Alternatively, don't render the
+  buffer's subtree at all while it's occluded.
+- **Suggested fix:** Composite buffer planes within the normal z-stack so an
+  opaque box's `bg` clears the cells beneath it (or expose an `opaque`/clear flag
+  on the covering box).
+
 ---
 
 ## Runtime / isolate

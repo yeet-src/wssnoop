@@ -129,6 +129,7 @@ function freshConn(pid, ssl, now) {
     extensions: null,
     origin: null,
     status: "open", /* open → closing → closed (from a CLOSE frame) */
+    truncated: false, /* a capture artifact, orthogonal to status (see ingest) */
     closeCode: null,
     closeReason: null,
     closedAt: null,
@@ -308,10 +309,11 @@ export function createRegistry({ onDrop } = {}) {
     }
 
     /* A truncated chunk (an SSL call larger than the BPF capture cap) leaves an
-     * unparseable hole — the decoder abandons this stream. Mark the conn so the
-     * UI shows it stopped rather than a silently-frozen "open" row. */
+     * unparseable hole — the decoder abandons this stream. This is a *capture*
+     * artifact, orthogonal to the connection's lifecycle, so it's a flag, not a
+     * status: the conn may well still be open, we just can't follow it anymore. */
     if (rec.type === "truncated") {
-      c.status = "truncated";
+      c.truncated = true;
       c.closeReason = c.closeReason || "capture truncated (SSL call exceeded the 4 KB cap)";
     }
   }
@@ -363,7 +365,7 @@ export function createRegistry({ onDrop } = {}) {
    * everything. */
   const focusGone = (key) => {
     const c = conns.get(key);
-    return !c || c.status === "closed" || c.status === "truncated";
+    return !c || c.status === "closed" || c.truncated;
   };
   return { ingest, evict, snapshot, focusGone };
 }

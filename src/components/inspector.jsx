@@ -61,9 +61,10 @@ const copy = (text, note) => {
 const RULE = "─".repeat(400);
 const MAX_LINES = 400; /* cap an expanded payload so a huge frame can't run away */
 
-/* Panel takes a comfortable slice for JSON, but never the whole width nor less
- * than a readable minimum; on a narrow terminal it's nearly full-screen. */
-const panelW = (cols) => Math.max(40, Math.min(cols - 4, Math.round(cols * 0.62)));
+/* Panel takes most of the width — JSON is wide — but never the whole screen nor
+ * less than a readable minimum; on a narrow terminal it's nearly full-screen.
+ * The cap leaves room for the float's margin and the 1-cell drop-shadow. */
+const panelW = (cols) => Math.max(40, Math.min(cols - 6, Math.round(cols * 0.72)));
 
 const ageOf = (now, at) => `${fmtAgo(now - at)}`.padStart(4);
 const arrow = (dir) => (dir === DIR_WRITE ? fg(COL.out)("↑") : fg(COL.in)("↓"));
@@ -85,6 +86,9 @@ const oneLine = (s) => (s == null ? "" : s.replace(/\s+/g, " ").trim());
 
 export default function Inspector({ groups, now, size }) {
   let count = 0; /* messages last rendered — clamps the wheel */
+  /* Visible message rows = the log viewport height, shared by the list and the
+   * scrollbar so the thumb math matches what's shown (≈ panel minus chrome). */
+  const viewH = () => Math.max(4, size.get().rows - 15);
 
   /* Follow vs. paused (state in controls.js, see note there). A busy socket
    * prepends faster than you can read, so the moment you scroll or expand we
@@ -164,7 +168,14 @@ export default function Inspector({ groups, now, size }) {
         toggle(rec.seq);
         e.stopPropagation();
       }}
-      {...tip(() => `message #${rec.seq} — ${rec.name}, ${fmtBytes(rec.len)}; click to ${expanded.get() === rec.seq ? "collapse" : "expand"}`)}
+      {...tip(() => {
+        const badge = rec.inflateError
+          ? " · ⚠ permessage-deflate inflate failed"
+          : rec.compressed
+            ? " · ⚙ arrived compressed (shown decoded)"
+            : "";
+        return `message #${rec.seq} — ${rec.name}, ${fmtBytes(rec.len)}${badge}; click to ${expanded.get() === rec.seq ? "collapse" : "expand"}`;
+      })}
     >
       <Text break="none">
         {() => [
@@ -263,13 +274,23 @@ export default function Inspector({ groups, now, size }) {
         {...tip("inspector — click here or press Esc to close")}
       />
 
-      {/* the docked panel */}
+      {/* the floating panel + its drop-shadow. The wrapper carries a border on
+          just the right & bottom sides, drawn with the ▒ shade glyph — a classic
+          box-shadow. Its border-box insets the real panel by that 1 cell, so the
+          shadow falls outside the rounded frame (│▒ on the right, ▒ below). */}
       <Box
-        width={() => panelW(size.get().cols)}
-        right={0}
-        top={0}
-        bottom={0}
+        width={() => panelW(size.get().cols) + 1}
+        right={1}
+        top={1}
+        bottom={1}
         z={1}
+        border={{ line: "▒▒▒▒▒▒", sides: ["right", "bottom"], fg: COL.shadow }}
+        direction="column"
+        overflow="visible"
+      >
+       <Box
+        width="1fr"
+        height="1fr"
         bg={COL.panel}
         border={{ line: "round", fg: COL.accent }}
         padding={[0, 1]}
@@ -322,16 +343,23 @@ export default function Inspector({ groups, now, size }) {
 
         {/* detail lines — two compact always-on lines plus an expandable block
             ("details") that surfaces every negotiated/lifecycle dimension. */}
-        <Box direction="column" height="fit" break="none">
+        <Box
+          direction="column"
+          height="fit"
+          break="none"
+          {...tip("connection summary — ↑/↓ are message counts then byte totals; ⚙ N× is the permessage-deflate compression ratio (decoded ÷ on-wire); ✂ marks a truncated capture")}
+        >
           {() => {
             const c = lookup();
             if (!c) return <Text break="anywhere">{fg(COL.dim)("It is no longer in the registry.")}</Text>;
             const n = now.get();
             const more = details.get();
+            /* status is the lifecycle (open/closed); truncation is orthogonal —
+             * a capture artifact, not a state — so it rides alongside as a calm
+             * ✂ caution rather than clobbering the status with a red warning. */
             const STATUS = {
               open: [fg(COL.ok), "● open"],
               closed: [fg(COL.warn), "✕ closed"],
-              truncated: [fg(COL.warn), "⚠ truncated"],
             };
             const [stat, statLabel] = STATUS[c.status] ?? STATUS.open;
             const ratio = c.wireBytes > 0 ? c.inflatedBytes / c.wireBytes : 0;
@@ -340,6 +368,7 @@ export default function Inspector({ groups, now, size }) {
                 {[
                   fg(COL.dim)("status "),
                   stat(statLabel),
+                  c.truncated ? fg(COL.snip)(" · ✂ truncated") : "",
                   fg(COL.dim)(" · "),
                   fg(roleColor(c.role))(c.role),
                   fg(COL.dim)(` · ${c.dest}`),
@@ -432,27 +461,49 @@ export default function Inspector({ groups, now, size }) {
 
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
-        {/* the message log */}
-        <Box height="1fr" overflow="hidden" onWheel={onWheel}>
+        {/* the message log + its scrollbar */}
+        <Box direction="row" height="1fr" overflow="hidden" onWheel={onWheel}>
+          <Box width="1fr" height="1fr" overflow="hidden">
+            {() => {
+              const c = lookup();
+              if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;
+              now.get(); /* refresh the tail each heartbeat while following live */
+              raw.get(); /* re-render the expanded payload when raw/decoded flips */
+              const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
+              count = all.length;
+              if (count === 0) {
+                const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
+                return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
+              }
+              const top = Math.max(0, Math.min(scroll.get(), count - 1));
+              const open = expanded.get();
+              /* Flat list: preview rows are direct children; an expanded payload
+                 follows its row as a sibling (not nested) so each clickable row
+                 keeps a definite-height parent. */
+              return all.slice(top, top + viewH()).flatMap((rec) =>
+                rec.seq === open ? [previewRow(rec), Payload(rec)] : [previewRow(rec)],
+              );
+            }}
+          </Box>
           {() => {
-            const c = lookup();
-            if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;
-            now.get(); /* refresh the tail each heartbeat while following live */
-            raw.get(); /* re-render the expanded payload when raw/decoded flips */
-            const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
-            count = all.length;
-            if (count === 0) {
-              const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
-              return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
-            }
-            const rows = Math.max(4, size.get().rows - 15);
-            const top = Math.max(0, Math.min(scroll.get(), count - 1));
-            const open = expanded.get();
-            /* Flat list: preview rows are direct children; an expanded payload
-               follows its row as a sibling (not nested) so each clickable row
-               keeps a definite-height parent. */
-            return all.slice(top, top + rows).flatMap((rec) =>
-              rec.seq === open ? [previewRow(rec), Payload(rec)] : [previewRow(rec)],
+            /* A proportional scrollbar: thumb size = window/total, position =
+               scroll/maxScroll. Hidden (zero-width) when everything fits. */
+            if (!lookup()) return null;
+            now.get();
+            const n = currentMsgs().length;
+            const h = viewH();
+            if (n <= h) return null;
+            const thumb = Math.max(1, Math.round((h / n) * h));
+            const top = Math.max(0, Math.min(scroll.get(), n - 1));
+            const pos = Math.min(h - thumb, Math.round((top / Math.max(1, n - h)) * (h - thumb)));
+            return (
+              <Box width={1} direction="column" break="none">
+                {Array.from({ length: h }, (_, i) => (
+                  <Text height={1} break="none">
+                    {i >= pos && i < pos + thumb ? fg(COL.accent)("█") : fg(COL.header)("░")}
+                  </Text>
+                ))}
+              </Box>
             );
           }}
         </Box>
@@ -469,6 +520,7 @@ export default function Inspector({ groups, now, size }) {
             )
           }
         </Text>
+       </Box>
       </Box>
     </Layer>
   );

@@ -176,6 +176,19 @@ export const keymap = {
   "]": () => cycleViz(1),
 };
 
+/* ---- column resize (drag the DEST / activity boundary) --------------- */
+/* `destWidth` is the DEST column width in cells, or null for auto (the
+ * sparkline-capped default in columns.layout). Dragging the header handle pins
+ * an explicit width; `dragging` mounts a full-screen overlay (root) that tracks
+ * the move so the pointer needn't stay on the 1-cell handle. The pointer-x →
+ * cells conversion lives with the geometry (columns.js / toolbar); this layer
+ * just holds the state. Double-click the handle to release back to auto. */
+export const destWidth = signal(null);
+export const dragging = signal(false);
+export const startColDrag = () => dragging.set(true);
+export const endColDrag = () => dragging.set(false);
+export const resetColWidth = () => destWidth.set(null);
+
 export const hoverTitle = signal(""); // current tooltip (string | thunk), resolved in the minibuffer
 
 /* Transient status line (e.g. "copied 42 messages"). Shown in the minibuffer

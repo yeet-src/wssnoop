@@ -15,7 +15,7 @@ import Button from "./button.jsx";
 import Row from "./row.jsx";
 import Sparkline from "./sparkline.jsx";
 import { COL } from "./palette.js";
-import { LEFT, GAP } from "./columns.js";
+import { GAP, HANDLE } from "./columns.js";
 import {
   collapseFor, cycleGroup, COLLAPSE_STEPS, COLLAPSE_LABELS,
   sortKey, filters, tip,
@@ -26,7 +26,7 @@ import { procInfo, resolve } from "../probes/procinfo.js";
 const glyph = (n) => (n === 0 ? "▸" : n === Infinity ? "▿" : "▾");
 const nextCollapse = (n) => COLLAPSE_STEPS[(COLLAPSE_STEPS.indexOf(n) + 1) % COLLAPSE_STEPS.length];
 
-export default function Group({ group, conns, now, span, width, order }) {
+export default function Group({ group, conns, now, span, geom, order }) {
   const { pid, hist } = group;
   resolve(pid); /* fire-and-forget identity lookup; cached, published reactively */
 
@@ -69,7 +69,7 @@ export default function Group({ group, conns, now, span, width, order }) {
         order={-1}
         {...tip(headerTip)}
       >
-        <Box width={LEFT} direction="row" gap={GAP} break="none">
+        <Box width={geom.left} direction="row" gap={GAP} break="none">
           {/* Stateful toggle: the glyph shows the current rows mode, and its
               tooltip names that mode and what the next click does. */}
           <Button
@@ -101,14 +101,15 @@ export default function Group({ group, conns, now, span, width, order }) {
           </Box>
           <Text break="none" fg={COL.dim}>{`${conns.length} ws`}</Text>
         </Box>
-        <Sparkline hist={hist} now={now} span={span} width={width} variant="agg" />
+        <Box width={HANDLE} break="none" />
+        <Sparkline hist={hist} now={now} span={span} width={geom.spark} variant="agg" />
       </Box>
       {conns.map((c) => (
         <Row
           conn={c}
           now={now}
           span={span}
-          width={width}
+          geom={geom}
           order={() => ranks.get().get(c.key) ?? 0}
           visible={() => {
             const r = ranks.get().get(c.key) ?? 1e9;

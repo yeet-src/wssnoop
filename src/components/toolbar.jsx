@@ -8,12 +8,12 @@
  * (Button → controls.hoverTitle). Labels are thunks over the control signals, so
  * a click repaints the label in place. */
 
-import { Box, Text, face, computed } from "yeet:tui";
+import { Box, Text, face, computed, signal } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
 import { COL } from "./palette.js";
-import { INDENT, W_ROLE, W_DEST, W_MSG, GAP, LEFT, sparkWidth } from "./columns.js";
+import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
 import {
   vizRange, RANGE_LABELS, cycleViz,
   sortKey, SORT_LABELS, cycleSort,
@@ -21,10 +21,36 @@ import {
   collapse, COLLAPSE_LABELS, cycleAll,
   search, searchActive, startSearch,
   focusKey, clearFocus,
+  destWidth, dragging, startColDrag, resetColWidth,
   titles, tip,
 } from "../controls.js";
 
+/* The column-resize handle: a 1-cell separator between the left region and the
+ * activity sparkline. Drag it to pin the DEST width (root mounts a full-screen
+ * lid that tracks the pointer); double-click to release back to auto. It brightens
+ * to a solid bar on hover or while dragging, and rests as a faint ┊. */
+function Resizer() {
+  const hov = signal(false);
+  return (
+    <Box
+      width={HANDLE}
+      break="none"
+      setHover={hov}
+      onMouseDown={startColDrag}
+      onDblClick={resetColWidth}
+      {...tip("drag to resize the DEST / ACTIVITY split — double-click to auto-fit")}
+    >
+      <Text break="none">
+        {() => (hov.get() || dragging.get() ? face({ fg: COL.accent })("│") : face({ fg: COL.header })("┊"))}
+      </Text>
+    </Box>
+  );
+}
+
 export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
+  /* One geometry, derived per read from the live width + drag state, so the
+   * header strips re-flow in lockstep with the table during a resize or drag. */
+  const geom = () => layout(sizeSig.get().cols, destWidth.get());
   /* The global histogram object is stable (the registry reuses it), but the
    * `global` signal re-sets a fresh wrapper every heartbeat. Dedupe to the
    * stable hist so the global Sparkline node isn't re-minted twice a second —
@@ -97,7 +123,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
       {/* strip 2 — global aggregate bar */}
       <Box direction="row" height={1} overflow="hidden">
         <Box
-          width={LEFT}
+          width={() => geom().left}
           padding={[0, 0, 0, INDENT]}
           break="none"
           overflow="hidden"
@@ -105,30 +131,27 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         >
           <Text break="none" bold fg={COL.accent}>ALL</Text>
         </Box>
+        <Box width={HANDLE} break="none" />
         {() => (
-          <Sparkline
-            hist={ghist.get()}
-            now={now}
-            span={span}
-            width={sparkWidth(sizeSig.get().cols)}
-            variant="global"
-          />
+          <Sparkline hist={ghist.get()} now={now} span={span} width={geom().spark} variant="global" />
         )}
       </Box>
 
-      {/* strip 3 — column headers */}
+      {/* strip 3 — column headers (DEST flexes; the handle between this strip and
+          the activity caption is the drag-to-resize grip) */}
       <Box direction="row" height={1} overflow="hidden">
-        <Box width={LEFT} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
+        <Box width={() => geom().left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
           <Box width={W_ROLE} {...tip("ROLE — client (we opened it) or server (we serve it)")}>
             <Text fg={COL.header} break="none">ROLE</Text>
           </Box>
-          <Box width={W_DEST} {...tip("DEST — destination wss:// URL for client connections; '?' for served ones")}>
+          <Box width={() => geom().dest} overflow="hidden" {...tip("DEST — destination wss:// URL for client connections; '?' for served ones")}>
             <Text fg={COL.header} break="none">DEST</Text>
           </Box>
           <Box width={W_MSG} {...tip("MSG — WebSocket messages sent (↑) and received (↓)")}>
             <Text fg={COL.header} break="none">MSG ↑/↓</Text>
           </Box>
         </Box>
+        <Resizer />
         <Box {...tip("ACTIVITY — bytes/sec over the window; upper half = sent, lower = received; brighter = more")}>
           <Text break="none" fg={COL.header}>
             {() => `ACTIVITY · last ${RANGE_LABELS[vizRange.get()]} (▀ up / ▄ down)`}

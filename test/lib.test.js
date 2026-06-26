@@ -259,6 +259,17 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   reg.evict(2000 + 21000);
   eq(reg.snapshot().groups.length, 0, "registry: closed conn evicted after grace");
 }
+{
+  // truncated is a capture artifact, orthogonal to status: the conn stays "open"
+  // but is flagged, and focus releases (the decoder can't follow it anymore)
+  const reg = createRegistry();
+  reg.ingest({ type: "message", pid: 5, ssl: 50n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1000);
+  reg.ingest({ type: "truncated", pid: 5, ssl: 50n, dir: DIR_READ, capLen: 4096, len: 9000 }, 1100);
+  const c = reg.snapshot().groups[0].conns[0];
+  eq(c.status, "open", "registry: truncation does not clobber status");
+  ok(c.truncated, "registry: truncation sets the orthogonal flag");
+  ok(reg.focusGone("5:50"), "registry: focusGone true for a truncated conn");
+}
 
 /* ---- summary -------------------------------------------------------- */
 console.log(`\n${fail === 0 ? "✓ PASS" : "✗ FAIL"} — ${pass} passed, ${fail} failed`);

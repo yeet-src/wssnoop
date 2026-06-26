@@ -19,7 +19,7 @@
 import { Box, CellBuffer, Effect } from "yeet:tui";
 
 import { heatFor } from "../lib/format.js";
-import { tip } from "../controls.js";
+import { tip, isInspecting } from "../controls.js";
 
 const GLYPH = 0x2580; // "▀" upper half block (a single code point → stored as-is)
 
@@ -43,6 +43,16 @@ export default function Sparkline({ hist, now, span, width, variant = "conn", ti
 
   const draw = () => {
     if (!hist) return;
+    /* The runtime composites a CellBuffer above any box behind it, so an opaque
+     * panel can't occlude these cells — its empty cells let our ▀ bleed through.
+     * The table's bars (conn/agg) sit entirely under the inspector, so blank
+     * them to spaces (transparent) while it's open. The global bar lives in the
+     * toolbar, above the panel, so it keeps drawing. */
+    if (variant !== "global" && isInspecting()) {
+      for (let c = 0; c < w; c++) { chars[c] = 0x20; fg[c] = 0; bg[c] = 0; }
+      cb.touch();
+      return;
+    }
     const s = span.get();
     /* Snap the right edge to the column grid (colMs = span/w). Without this the
      * window re-bins every bucket a fraction of a cell each tick, so the bars
