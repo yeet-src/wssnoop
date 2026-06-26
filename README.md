@@ -1,135 +1,152 @@
 # wssnoop
 
-Decode the WebSocket traffic riding inside a process's **TLS** connections,
-by tapping the plaintext at the OpenSSL boundary with eBPF. Built to test
-against the demo in [`demo/`](./demo), but works on any OpenSSL-linked
-process (Node, Python, curl, …).
+A live inspector for the WebSocket traffic riding inside a process's **TLS**
+connections — tapped as plaintext at the OpenSSL boundary with eBPF, decoded
+and presented as a reactive terminal UI.
 
-Exchange / Polymarket WebSockets are `wss://` — TLS-encrypted — so a
-packet-level tap only sees ciphertext. wssnoop instead uprobes
-`SSL_write` / `SSL_read`, where the data is still (or already) plaintext,
-and reassembles the WebSocket frames in JS.
+`wss://` is TLS-encrypted, so a packet tap sees only ciphertext. wssnoop
+uprobes `SSL_write` / `SSL_read`, where the bytes are still (or already)
+plaintext, reassembles the RFC-6455 frames in JS (inflating
+`permessage-deflate`), and shows them grouped by process and connection.
+
+Built for inspecting exchange / prediction-market sockets (Polymarket,
+Coinbase, …), but works on any OpenSSL-linked process (Node, Python, curl, …).
+
+## What it does
+
+- **Grouped table** — one section per process (`comm` / cmdline resolved via the
+  system graph, plus a container tag), each streaming its WebSocket connections
+  as rows: role (client/server, inferred from the handshake direction),
+  destination `wss://` URL, message ↑/↓ counts, and a two-tone activity
+  sparkline (upper half = egress, lower = ingress; brightness = bytes/sec).
+- **Drill-down inspector** — click a connection for a docked panel over the
+  dimmed table: live message log (newest first), click a message to pause and
+  expand its payload as **syntax-highlighted JSON**, text, or a hex dump
+  (toggle raw bytes even when decoded). Compressed messages are shown
+  **decompressed**, with a `⚙` badge and per-message compression ratio.
+- **All the metadata, discoverable** — an `⊕ details` expansion surfaces
+  deflate params, subprotocol, extensions, origin, opcode histogram, and close
+  code/reason; each expanded message shows frame health (fragmentation, masking
+  correctness, wire vs inflated size).
+- **Capture for fixtures** — `⧉ copy all` / `⧉ copy msg` write the messages as
+  JSON Lines to the system clipboard (OSC52, works over SSH/VM) — drop straight
+  into a test suite. Filtering narrows what's copied.
+- **Search / filter** — `/` opens a free-text query (messages while inspecting,
+  connections otherwise); plus role and active-only filters and column sort.
+- **Act on the kernel** — `⊙ focus` writes the BPF capture filter live so the
+  probe emits only the focused connection's events; every other one goes silent
+  *in the kernel*, at near-zero overhead. A real user→kernel write, not just a
+  read.
 
 ## How it works
 
 ```
-SSL_write(ssl, buf, num)   uprobe        plaintext in buf at entry   (egress, masked)
-SSL_read(ssl, buf, num)    uprobe+uret   buf filled by return, len=ret (ingress, unmasked)
+SSL_write(ssl, buf, num)  uprobe       plaintext in buf at entry    (egress, masked)
+SSL_read(ssl, buf, num)   uprobe+uret  buf filled by return, len=ret (ingress, unmasked)
         │
-   ringbuf  ── { ssl-ptr, pid, tid, dir, len, data } ──▶  capture (probes/probe.js)
-                                                            │
+   ringbuf ── { ssl-ptr, pid, tid, dir, len, data } ──▶  capture (probes/probe.js)
+                                                           │
                               reassemble per (pid, ssl, dir)   (lib/decode.js)
-                              → HTTP upgrade handshake (notes permessage-deflate)
-                              → RFC-6455 frames: unmask, de-fragment, JSON-decode
-                                                            │
-                                          live terminal log  (components/view.jsx)
+                              → HTTP upgrade handshake (permessage-deflate params)
+                              → RFC-6455 frames: unmask, de-fragment, inflate, JSON
+                                                           │
+                              registry of connections-over-time (state.js)
+                                                           │
+                              reactive signals → grouped table + inspector (components/)
 ```
 
-The `SSL*` pointer is shipped as an opaque connection id; JS demuxes
-streams by `(pid, ssl, direction)`. No parsing happens in the kernel.
+The `SSL*` pointer is the opaque connection id; JS demuxes streams by
+`(pid, ssl, direction)`. No parsing happens in the kernel — only the capture
+(and the live `focus` filter) live there.
 
 ## Layout
 
-Generated from [`../script-template`](../script-template), in its source
-layout — the three orthogonal halves are one module each. Internal imports
-are **relative** (not the template's bundle-time `@/` alias) so the source
-runs directly without a build step — `yeet run src/main.jsx` — for a tight
-iteration loop; `make` still bundles it to `src/index.jsx` for shipping.
+Source layout — internal imports are **relative** so it runs directly without a
+build step (`yeet run src/main.jsx`) for a tight loop.
 
 ```
-src/bpf/wssnoop.bpf.c   the tap: SSL_read/SSL_write uprobes → ringbuf
-src/probes/probe.js     capture: owns the BPF lifecycle, streams raw chunks up
+src/bpf/wssnoop.bpf.c   the tap: SSL_read/SSL_write uprobes → ringbuf; a live
+                        capture-filter (focus ssl/pid) written from JS
+src/probes/probe.js     capture: BPF lifecycle, raw chunks up, focus filter down
+src/probes/procinfo.js  process identity (comm/cmdline/exe/container) via the graph
 src/lib/decode.js       data: chunks → handshake + RFC-6455 frames → messages
-src/lib/buffer.js       a signal of a sliding window over the last N pushes
-                        (a circular buffer; the rolling log is built on it)
-src/state.js            bind: runs capture → decode as the producer of reactive
-                        signals (a bounded log + cumulative stats)
-src/components/         present: pure UI reading those signals — root (the app
-                        shell), header, footer, row (decoded event → log line)
+src/lib/timehist.js     data: a time-bucketed up/down byte ring per stream
+src/lib/{format,rank,export}.js  pure helpers: formatting + JSON highlight, sort
+                        metrics, JSONL/base64 export
+src/state.js            bind: decode → a registry of connections-over-time,
+                        published as reactive snapshot signals
+src/controls.js         view state: sort / filter / search / collapse / focus
+src/components/         present: pure UI reading signals (root, toolbar, group,
+                        row, inspector, sparkline, searchbar, minibuffer, button)
 src/main.jsx            the seam: parse args, build the session, mount the view
 ```
 
-`probes/` is the only BPF-aware code; `lib/decode.js` is pure data (no
-terminal, no I/O); `state.js` aggregates the decode stream into `from()`
-signals whose lifecycle is tied to the view being mounted; `components/` never
-see BPF or bytes, only signals. The same pipeline could drive a
-capture-to-disk or a test as easily as the TUI.
+`probes/` is the only BPF/graph-aware code; `lib/decode.js` is pure data;
+`components/` see only signals. The same pipeline could drive a capture-to-disk
+or a test as easily as the TUI (see `test/lib.test.js`).
 
 ## Build
 
-Per the repo's VM workflow (macOS host → Lima VM):
+The BPF object is built with a vendored clang/bpftool toolchain (no system C
+toolchain needed):
 
 ```sh
 cd wssnoop
-make            # clang + bpftool → bin/probe.bpf.o; esbuild → src/index.jsx
-                # (generates src/bpf/include/vmlinux.h from kernel BTF)
+make bpf         # clang + bpftool → bin/probe.bpf.o (+ vmlinux.h from kernel BTF)
 ```
 
-## Run
+`yeet run src/main.jsx` runs straight from source — no JS bundle step.
+
+## Run (the demo)
+
+One command brings up traffic and the UI, with no browser:
 
 ```sh
-yeet run . -- --pid <pid> --bin <ssl-binary> [--full] [--secs N]
+./demo/run.sh --attach     # 3 worker processes × (coinbase+kraken+polymarket),
+                           # then wssnoop attached to all of them
+./demo/run.sh              # just the traffic; prints the attach command
+./demo/run.sh --stop       # stop the workers
 ```
 
-The UI is a live, scrolling log (built on `yeet:tui`) — newest event at the
-bottom, header showing the tap and running counts. Press `q` or `Ctrl-C` to
-quit.
+The workers (`demo/worker.mjs`) run as distinct processes (`order-router`,
+`md-gateway`, `risk-engine`), each holding several live `wss://` connections and
+continuously churning subscriptions, so there's rich multi-process,
+multi-connection, bidirectional traffic immediately.
+
+### Attaching to your own process
+
+```sh
+yeet run src/main.jsx -- --pid <pid> --bin <ssl-binary> [--secs N]
+```
 
 `--bin` is **where the `SSL_*` symbols live**:
 
-- **`libssl.so`** (the default) — when the target links OpenSSL
-  dynamically. Debian/Ubuntu `apt` node does this.
-- **an absolute path to a statically-linked executable** (e.g.
-  `/usr/bin/node` from the official tarball / nodesource) — OpenSSL is
-  baked into the binary, so probe the binary itself.
-
-Find the right target for a running process:
+- a shared **`libssl.so`** when the target links OpenSSL dynamically, or
+- an **absolute path to a statically-linked executable** (e.g. nvm/official
+  Node bakes OpenSSL in — probe the `node` binary itself).
 
 ```sh
-readlink /proc/<pid>/exe          # the executable
-ldd "$(readlink /proc/<pid>/exe)" | grep -i ssl   # shared libssl? → use that path
+readlink /proc/<pid>/exe                            # the executable
+ldd "$(readlink /proc/<pid>/exe)" | grep -i ssl     # shared libssl? use that
 ```
 
-Flags: `--pid` scope to one process (recommended — otherwise every process
-mapping `--bin` is traced); `--full` don't truncate payloads; `--maxlen N`
-truncation cap (default 1500); `--secs N` run for N seconds then exit
-(default: until you quit).
+With no `--pid`, every process mapping `--bin` is traced (this is how the demo
+sees all three workers at once) — but note a `--bin`-only attach hooks the
+processes that exist *at attach time*, so start the targets first.
 
-## Verified working (against the `demo/`, Node 24 static OpenSSL)
+Keys: `/` search, `q` / `Ctrl-C` quit, `Esc` backs out (clear filter → close
+inspector → quit). Everything else is mouse-driven; hover any control for help
+in the minibuffer.
 
-- Attaches to a static-OpenSSL Node binary by symbol, captures plaintext
-  from **both** directions of **multiple concurrent** TLS WebSockets on one
-  pid, demuxed by the `SSL*` pointer.
-- **Masking** — client→server frames are unmasked correctly (verified on the
-  egress `PING` keepalive).
-- **Handshake + compression detection** — distinguishes plain HTTPS (REST,
-  ignored), a Polymarket WS (`101`, no compression → clean JSON), and a
-  Coinbase WS (`101` with `permessage-deflate` → flagged).
-- Decodes a full message cleanly: e.g. a 13.5 KB Polymarket order-book
-  `book` event parsed straight to JSON.
-- `--debug` hexdumps the frame-stream head — handy for diagnosing the below.
+## Notes / limits
 
-## Known limits (it's a starting point, not a finished tool)
-
-- **Multi-message bursts can desync.** The first frame of a burst decodes
-  cleanly; a later large frame in the same burst can lose alignment (the
-  parser then reads payload bytes as frame headers). Single-message cadence
-  (price_change/trade updates, the first book) is solid. Root-cause still
-  open — `--debug` shows the frame headers to chase it.
-- **No `permessage-deflate` inflate.** When negotiated (Coinbase does;
-  Polymarket does not — wssnoop flags it), text payloads arrive
-  deflate-compressed and are shown raw. Inflating needs a zlib path the
-  runtime doesn't expose yet.
-- **Egress duplicates.** `SSL_write` is captured at entry, so non-blocking
-  `WANT_WRITE` retries surface the same frame 2–3× (visible on the upgrade
-  request / subscribe). Fix: capture `SSL_write` at return (like `SSL_read`)
-  and key on the byte count actually written.
-- **16 KB capture cap per SSL call** (`CHUNK` in `src/bpf/wssnoop.bpf.c`).
-  One TLS record maxes near this, but a coalesced read larger than it
-  truncates; wssnoop reports it and drops that connection rather than emit
-  garbage.
-- **Mid-stream attach desyncs** until the connection reconnects — a fresh
-  handshake resets the stream (handled; OpenSSL reuses `SSL*` addresses).
-- **Symbols:** hooks `SSL_read`/`SSL_write` only — not `SSL_read_ex` /
-  `SSL_write_ex`. Stripped static binaries may not export `SSL_*`; use the
-  `offset:` attach option.
+- **Mid-stream attach** shows `?` for role/dest until the connection reconnects
+  with a fresh handshake (OpenSSL reuses `SSL*` addresses; a new handshake
+  resets the stream). The demo workers recycle connections so this self-heals.
+- **16 KB capture cap per SSL call** (`CHUNK` in `wssnoop.bpf.c`). One TLS
+  record maxes near this; a larger coalesced read is reported as truncated
+  rather than emitting garbage.
+- Hooks `SSL_read` / `SSL_write` (not the `_ex` variants). Stripped static
+  binaries may need the `offset:` attach option.
+- Export goes to the system clipboard via OSC52 — large captures may hit your
+  terminal's clipboard size cap.
