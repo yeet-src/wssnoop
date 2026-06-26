@@ -32,20 +32,28 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
   const ghist = computed(() => global.get().hist);
   return (
     <Box direction="column" height="fit">
-      {/* strip 1 — identity + counts + controls */}
-      <Box direction="row" height={1} gap={1}>
-        <Text break="none" bold fg={COL.title}>wssnoop</Text>
-        <Box {...tip("tap status — the SSL_read/SSL_write uprobe state")}>
-          <Text break="none" fg={COL.dim}>{() => status.get()}</Text>
-        </Box>
-        <Box {...tip("live totals — open WebSocket connections · messages decoded")}>
-          <Text break="none" fg={COL.dim}>
-            {() => `${stats.get().conns} ws · ${stats.get().msgs} msgs`}
+      {/* strip 1 — identity + counts + controls. The wrapper boxes are
+          break="none": a text leaf wears its *container's* break (not the
+          <Text>'s), so a wrappable wrapper would wrap and bleed into the strips
+          below at narrow widths. The row itself clips (overflow="hidden") so a
+          too-narrow terminal drops the rightmost controls instead of garbling. */}
+      <Box direction="row" height={1} gap={1} overflow="hidden">
+        {/* identity + status + counts as ONE run: adjacent auto-width boxes
+            don't reliably keep their gap (a box around a dynamic thunk
+            under-measures its right edge), so spacing is explicit inside one
+            Text instead. */}
+        <Box break="none" {...tip("wssnoop — uprobe tap status · open WebSocket connections · messages decoded")}>
+          <Text break="none">
+            {() => [
+              face({ bold: true, fg: COL.title })("wssnoop  "),
+              face({ fg: COL.dim })(`${status.get()}   ${stats.get().conns} ws · ${stats.get().msgs} msgs`),
+            ]}
           </Text>
         </Box>
         {/* capture-focus indicator: visible only when the kernel filter is
             pinned to one connection; click to release. */}
         <Box
+          break="none"
           onClick={clearFocus}
           {...tip("eBPF capture is focused on one connection (others silenced in-kernel) — click to release")}
         >
@@ -87,11 +95,12 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
       </Box>
 
       {/* strip 2 — global aggregate bar */}
-      <Box direction="row" height={1}>
+      <Box direction="row" height={1} overflow="hidden">
         <Box
           width={LEFT}
           padding={[0, 0, 0, INDENT]}
           break="none"
+          overflow="hidden"
           {...tip("ALL — every traced process and connection, combined")}
         >
           <Text break="none" bold fg={COL.accent}>ALL</Text>
@@ -108,7 +117,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
       </Box>
 
       {/* strip 3 — column headers */}
-      <Box direction="row" height={1}>
+      <Box direction="row" height={1} overflow="hidden">
         <Box width={LEFT} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
           <Box width={W_ROLE} {...tip("ROLE — client (we opened it) or server (we serve it)")}>
             <Text fg={COL.header} break="none">ROLE</Text>
