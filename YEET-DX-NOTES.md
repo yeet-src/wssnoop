@@ -159,6 +159,32 @@ reality · **[uncatchable]** can't be handled from JS.
   query against a timeout. *Suggested fix:* per-query server-side deadline +
   cancellation, so one bad query can't take the daemon hostage.
 
+### 18. `proc(pid)` *throws* for a dead pid instead of returning null **[silent]**
+- **Symptom:** Liveness-checking a stopped process with `{ proc(pid: N) { exe } }`
+  rejects the whole query: `ServerError "File not found: /proc/N"` — and one bad
+  pid kills the batch.
+- **Cause:** `proc(pid)` resolves straight off `/proc/<pid>` and surfaces the
+  ENOENT as a GraphQL error, not a nullable result.
+- **Workaround:** Don't probe pids individually for liveness — query
+  `{ procs { stat { pid } } }` once and treat any known pid absent from that set
+  as exited. (This is what wssnoop's procinfo liveness poll does.)
+- **Suggested fix:** Make `proc(pid)` nullable (return null for a gone pid) so a
+  liveness check is a null-test, not exception handling.
+
+### 19. Repeated crash-loop / `kill -9` of jails can wedge the worker manager
+- **Symptom:** After many fast `yeet run` crashes + `sudo kill -9 'yeetd: jail'`
+  cycles (stress-testing), the V8 worker *manager* itself wedged — `/v8/isolates`
+  returned `500` for **every** script (even a no-graph `console.log`), not just
+  graph ones. Only a full `yeetd` restart recovered it.
+- **Cause:** Unclear — the watchdog respawn/backoff path seems to get stuck when
+  jails are force-killed faster than it can reconcile.
+- **Workaround:** Don't `kill -9` jails in a tight loop; let scripts exit (or use
+  `--secs`). To recover: restart the daemon (it re-attaches). Note the daemon is
+  launched detached (parent = init), so a kill needs a manual relaunch — the
+  stdout/stderr redirect is opened by the *launching user*, not root.
+- **Suggested fix:** A `yeet ps` / `yeet kill`-by-jail and a supervised daemon so
+  recovery doesn't mean hand-relaunching a root process.
+
 ---
 
 ## Tooling / run mechanics
