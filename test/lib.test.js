@@ -8,6 +8,7 @@
 
 import { createTimeHist, UP, DOWN } from "../src/lib/timehist.js";
 import { createDecoder, parseFrame, DIR_READ, DIR_WRITE } from "../src/lib/decode.js";
+import { createRegistry } from "../src/state.js";
 import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
@@ -172,6 +173,53 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   const dump = hexDump(new Uint8Array([0x41, 0x42, 0x43]));
   ok(dump.includes("41 42 43"), "hexDump shows hex");
   ok(dump.includes("ABC"), "hexDump shows ascii");
+}
+
+/* ==== state registry ================================================= */
+{
+  const reg = createRegistry();
+  const t = 1000;
+  reg.ingest(
+    {
+      type: "handshake", pid: 1, ssl: 10n, dir: DIR_WRITE,
+      startLine: "GET /ws?x=1 HTTP/1.1",
+      headers: { host: "ex.com", "sec-websocket-protocol": "json", origin: "https://ex.com" },
+      deflate: { windowBits: 15, noContextTakeover: true },
+    },
+    t,
+  );
+  reg.ingest({ type: "message", pid: 1, ssl: 10n, dir: DIR_WRITE, msg: { name: "TEXT", opcode: 1, len: 10, wireLen: 6, compressed: true } }, t + 1);
+  reg.ingest({ type: "message", pid: 1, ssl: 10n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 20, wireLen: 8, compressed: true, text: "hi", json: { a: 1 } } }, t + 2);
+  const c = reg.snapshot().groups[0].conns[0];
+  eq(c.role, "client", "registry: role=client from egress handshake");
+  eq(c.dest, "wss://ex.com/ws?x=1", "registry: dest from host + path");
+  eq(c.subprotocol, "json", "registry: subprotocol header retained");
+  eq(c.origin, "https://ex.com", "registry: origin header retained");
+  eq(c.deflate.windowBits, 15, "registry: deflate params retained");
+  eq([c.msgUp, c.msgDn], [1, 1], "registry: up/down message counts");
+  eq(c.opcodes.TEXT, 2, "registry: opcode histogram");
+  eq([c.wireBytes, c.inflatedBytes], [14, 30], "registry: wire vs inflated byte sums");
+  eq(c.msgs.size, 2, "registry: messages retained in ring");
+}
+{
+  // a non-websocket on the SSL* forgets the connection
+  const reg = createRegistry();
+  reg.ingest({ type: "message", pid: 2, ssl: 20n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1);
+  eq(reg.snapshot().groups.length, 1, "registry: conn created from a frame");
+  reg.ingest({ type: "non-websocket", pid: 2, ssl: 20n, dir: DIR_READ }, 2);
+  eq(reg.snapshot().groups.length, 0, "registry: non-websocket drops the conn");
+}
+{
+  // CLOSE → closed + focusGone; evicted after the grace window
+  const reg = createRegistry();
+  reg.ingest({ type: "message", pid: 3, ssl: 30n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1000);
+  reg.ingest({ type: "message", pid: 3, ssl: 30n, dir: DIR_READ, msg: { name: "CLOSE", opcode: 0x8, control: true, len: 2, closeCode: 1000, closeReason: "bye" } }, 2000);
+  const c = reg.snapshot().groups[0].conns[0];
+  eq(c.status, "closed", "registry: CLOSE marks the conn closed");
+  eq(c.closeCode, 1000, "registry: close code recorded");
+  ok(reg.focusGone("3:30"), "registry: focusGone true for a closed conn");
+  reg.evict(2000 + 21000);
+  eq(reg.snapshot().groups.length, 0, "registry: closed conn evicted after grace");
 }
 
 /* ---- summary -------------------------------------------------------- */
