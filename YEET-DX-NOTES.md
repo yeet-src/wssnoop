@@ -58,6 +58,38 @@ reality · **[uncatchable]** can't be handled from JS.
 - **Suggested fix:** Nothing actionable beyond docs; a `from(producer, initial,
   {placeholder})` that suspends children until first emit would remove the class.
 
+### 16. A text leaf wears its CONTAINER's `break`, not the `<Text>`'s **[silent]**
+- **Symptom:** `<Box {...tip}><Text break="none">{thunk}</Text></Box>` wrapped a
+  one-line status, but at narrow widths the text **word-wrapped and bled
+  vertically** into the rows below — garbled overlap, not clipping.
+- **Cause:** A container promotes a child run to a text leaf "wearing the
+  *container's* `break`" (`module.js` `leafOf`/`container`). The wrapper `<Box>`
+  had no `break`, so it defaulted to word-wrap — the inner `<Text break="none">`
+  was ignored for wrapping. Nothing warns; it only shows when the box is forced
+  narrow.
+- **Workaround:** Put `break="none"` on the **Box**, not (only) the `<Text>`; add
+  `overflow="hidden"` on the row so residual overflow clips instead of bleeding.
+- **Suggested fix:** Make `<Text break>` authoritative for its own run, or
+  document loudly that `break`/`overflow` are *container* concerns (the API note
+  says so in passing, but the failure mode — vertical bleed — is non-obvious).
+
+### 17. Auto-width box around a dynamic thunk under-measures its right edge **[silent]**
+- **Symptom:** Two adjacent `gap={1}` boxes whose text came from thunks rendered
+  with **no gap** between them (`libssl.so0 ws`); the right box's text overlapped
+  the next sibling by ~1 cell per separator glyph. `displayWidth("·")` is a
+  correct `1`, so it's not the glyph — it's the box's intrinsic measure.
+- **Cause:** The intrinsic width of a container wrapping a thunk/`computed` run
+  comes out ~1 short (per `·`/break-unit), so the slot is narrower than what
+  paints; with `overflow:visible` the tail spills past the slot and eats the gap,
+  and with `overflow:hidden` it clips a visible char even when space is free.
+  The flex *shrink* path (`layout/module.js` "shrink towards min content") also
+  splits such boxes oddly at narrow widths.
+- **Workaround:** Don't butt auto-width thunk-boxes together — render the related
+  pieces as **one run** with explicit interior spacing; reserve separate boxes
+  (for per-element tooltips) only where a gap can't collapse into a flex spacer.
+- **Suggested fix:** Measure container intrinsics with the same `displayWidth`
+  the renderer paints with, so slot width == painted width.
+
 ---
 
 ## Runtime / isolate
