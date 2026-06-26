@@ -380,7 +380,9 @@ export function createDecoder({ debug = false } = {}) {
             headers: hs.headers,
             isWebSocket: hs.isWebSocket,
             ext: hs.ext,
-            deflate: hs.deflate,
+            /* the parsed RFC-7692 params ({ windowBits, noContextTakeover }) or
+             * null — not the bare boolean, so consumers can show the window. */
+            deflate: s.deflate,
           }),
         );
         if (debug) out.push(dbg(e, s, "handshake-done"));
