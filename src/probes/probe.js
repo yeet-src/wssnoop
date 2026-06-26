@@ -39,13 +39,18 @@ const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("
 const race = (p, ms) => Promise.race([p, timeout(ms)]);
 
 /* The SSL-bearing binary for one pid: a mapped libssl wins (dynamic linking),
- * else the exe (static). */
+ * else the exe (static). Resolved *through the target's mount-namespace root*
+ * (`/proc/<pid>/root/...`) so a containerized process's node/libssl — an
+ * in-container path the host can't open directly — becomes host-attachable. For
+ * a host process `/proc/<pid>/root` is just `/`, so the path is unchanged. This
+ * is what lets `--pid <container-pid>` trace a process inside a container. */
 async function sslForPid(pid) {
   const { data } = await yeet.graph.query(`{ proc(pid: ${pid}) { exe maps { path } } }`);
   const p = data?.proc;
   if (!p) return null;
   const lib = (p.maps || []).map((m) => m.path).find((x) => x && /libssl/i.test(x));
-  return lib || p.exe || null;
+  const path = lib || p.exe || null;
+  return path ? `/proc/${pid}/root${path.startsWith("/") ? "" : "/"}${path}` : null;
 }
 
 /* Absolute exe of a running process whose exe-basename or comm matches `name`. */

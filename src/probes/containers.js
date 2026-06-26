@@ -13,7 +13,7 @@ import { from } from "yeet:tui";
 
 /* Container summaries are small, but a wedged Docker socket shouldn't stall us
  * — race every poll against a short timeout (see README's graph caveat). */
-const QUERY = `{ docker { list_containers { id name image state } } }`;
+const QUERY = `{ docker { list_containers { id names image state } } }`;
 const race = (p, ms) =>
   Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
 
@@ -27,7 +27,7 @@ export const containers = from((state) => {
         if (!c.id) continue;
         const short = c.id.slice(0, 12);
         m[short] = {
-          name: (c.name ?? "").replace(/^\//, "") || short, // Docker prefixes a slash
+          name: (c.names?.[0] ?? "").replace(/^\//, "") || short, // Docker prefixes a slash
           image: c.image ?? "",
           state: c.state ?? null,
         };

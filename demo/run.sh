@@ -32,7 +32,9 @@ USAGE
 COMMANDS
   start            start the worker processes; print the wssnoop attach command
   attach           start the workers AND launch wssnoop attached to them
-  stop             stop all demo workers
+  docker           run workers INSIDE a docker container and attach wssnoop to
+                   it — demonstrates the container nesting tier (needs docker)
+  stop             stop all demo workers (and the demo container)
   status           show which workers are running
   help             show this help (also shown with no command)
 
@@ -59,7 +61,7 @@ ABRUPT="${ABRUPT:-}"
 set_cmd() { [[ -z "$CMD" ]] || { echo "conflicting commands: $CMD and $1" >&2; exit 2; }; CMD="$1"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    start|attach|stop|status) set_cmd "$1" ;;
+    start|attach|docker|stop|status) set_cmd "$1" ;;
     help|--help|-h) CMD="help"; break ;;
     --recycle)    RECYCLE="$2"; shift ;;
     --recycle=*)  RECYCLE="${1#*=}" ;;
@@ -72,6 +74,18 @@ done
 
 NODE="$(command -v node 2>/dev/null || true)"
 YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
+CTR_NAME="wssnoop-demo"
+
+# Docker usually needs sudo here (the socket is root:docker); pick whichever
+# invocation can reach the daemon. Sets $DKR for use as `$DKR <args>`.
+DKR=""
+have_docker() {
+  [[ -n "$DKR" ]] && return 0
+  command -v docker >/dev/null 2>&1 || return 1
+  if docker info >/dev/null 2>&1; then DKR="docker"; return 0; fi
+  if sudo docker info >/dev/null 2>&1; then DKR="sudo docker"; return 0; fi
+  return 1
+}
 
 # Reap stale wssnoop isolates. `yeet run` outlives its client: closing the
 # terminal (or killing it) leaves the daemon-side isolate running its BPF tap,
@@ -87,6 +101,33 @@ stop() {
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   pkill -f "worker.mjs" 2>/dev/null || true
   reap_jails
+  if have_docker; then $DKR rm -f "$CTR_NAME" >/dev/null 2>&1 || true; fi
+}
+
+# Run the demo workers INSIDE one docker container, then attach wssnoop to the
+# container's node binary. node statically links its TLS, so we attach to *that*
+# binary (the container's own inode), reached from the host as
+# /proc/<pid>/root/<node> — wssnoop then sees the container's processes and
+# nests them under their container (procinfo reads the cgroup id; the graph's
+# docker field resolves the name). Two workers share the one node, so the tier
+# reads as: ⬢ wssnoop-demo → edge-proxy / api-gateway → connections.
+docker_demo() {
+  have_docker || { echo "docker not found or its daemon isn't reachable (install docker + start it)"; exit 1; }
+  npm install --no-audit --no-fund >/dev/null 2>&1 || true # ws into demo/node_modules (bind-mounted)
+  echo ">> pulling node:22-slim…"; $DKR pull -q node:22-slim >/dev/null
+  $DKR rm -f "$CTR_NAME" >/dev/null 2>&1 || true
+  local opts="--recycle $RECYCLE ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt}"
+  $DKR run -d --name "$CTR_NAME" -v "$DEMO_DIR":/app -w /app node:22-slim sh -c \
+    "node worker.mjs --role edge-proxy --feeds coinbase,kraken $opts & \
+     node worker.mjs --role api-gateway --feeds poly $opts & wait" >/dev/null
+  sleep 2
+  local pid nodep
+  pid="$($DKR inspect -f '{{.State.Pid}}' "$CTR_NAME")"
+  nodep="$($DKR exec "$CTR_NAME" sh -c 'command -v node')"
+  echo ">> container '$CTR_NAME' up (host pid $pid); launching wssnoop…"
+  cd "$REPO_DIR"
+  # No --pid: attach to the container's node inode so BOTH its workers are traced.
+  exec "$YEET" run src/main.jsx -- --bin "/proc/$pid/root$nodep"
 }
 
 status() {
@@ -114,6 +155,13 @@ case "$CMD" in
   status)  status; exit 0 ;;
   stop)    stop; echo "stopped demo workers"; exit 0 ;;
 esac
+
+# --- docker (containerized workers; no host node needed) ---------------------
+if [[ "$CMD" == "docker" ]]; then
+  stop          # clear any prior workers / jails / container
+  sleep 1
+  docker_demo   # runs the container and execs wssnoop
+fi
 
 # --- start / attach from here ------------------------------------------------
 [[ -n "$NODE" ]] || { echo "node not found — is nvm sourced?"; exit 1; }

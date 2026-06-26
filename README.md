@@ -15,8 +15,11 @@ Coinbase, …), but works on any OpenSSL-linked process (Node, Python, curl, …
 ## What it does
 
 - **Grouped table** — one section per process (`comm` / cmdline resolved via the
-  system graph, plus a container tag), each streaming its WebSocket connections
-  as rows: role (client/server, inferred from the handshake direction),
+  system graph), each streaming its WebSocket connections as rows; processes
+  that run in a container nest under a **container header** (⬢ name + image,
+  resolved via the graph's `docker` field) with their own aggregate sparkline.
+  Each connection row shows role (client/server, inferred from the handshake
+  direction),
   destination `wss://` URL, message ↑/↓ counts, and a two-tone activity
   sparkline (upper half = egress, lower = ingress; brightness = bytes/sec).
 - **Drill-down inspector** — click a connection for a docked panel over the
@@ -105,15 +108,20 @@ One command brings up traffic and the UI, with no browser:
 ./demo/run.sh attach     # 3 worker processes × (coinbase+kraken+polymarket),
                          # then wssnoop attached to all of them
 ./demo/run.sh start      # just the traffic; prints the attach command
+./demo/run.sh docker     # run the workers INSIDE a docker container and attach —
+                         # shows the container nesting tier (needs docker)
 ./demo/run.sh status     # which workers are running
-./demo/run.sh stop       # stop the workers
+./demo/run.sh stop       # stop the workers (and the demo container)
 ./demo/run.sh            # (or `help`) usage
 ```
 
 The workers (`demo/worker.mjs`) run as distinct processes (`order-router`,
 `md-gateway`, `risk-engine`), each holding several live `wss://` connections and
 continuously churning subscriptions, so there's rich multi-process,
-multi-connection, bidirectional traffic immediately.
+multi-connection, bidirectional traffic immediately. `docker` instead runs two
+workers inside one container, so the table shows them nested under their
+container (⬢) — wssnoop attaches to the container's own `node` binary (reached
+from the host via `/proc/<pid>/root/...`, since Node statically links its TLS).
 
 ### Attaching to your own process
 
@@ -130,7 +138,10 @@ yeet run src/main.jsx -- --pid <pid> [--bin <ssl-binary>] [--secs N]
 `--bin` is **optional** — omit it and wssnoop discovers the target from the
 process graph: a bare program name (`--bin node`) resolves to that program's
 exe, and `--pid N` alone finds that process's mapped `libssl` (or its exe for
-static SSL). Pass an explicit path/library to override. To resolve by hand:
+static SSL). A `--pid` inside a **container** works too: the binary is resolved
+through the process's mount namespace (`/proc/<pid>/root/...`), so the container's
+own `node`/`libssl` is attachable from the host. Pass an explicit path/library
+to override. To resolve by hand:
 
 ```sh
 readlink /proc/<pid>/exe                            # the executable
