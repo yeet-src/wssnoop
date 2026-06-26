@@ -50,7 +50,13 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           {...tip("eBPF capture is focused on one connection (others silenced in-kernel) — click to release")}
         >
           <Text break="none">
-            {() => (focusKey.get() ? bg(COL.accent)(fg(COL.ink)(bold(" ⊙ focused ✕ "))) : "")}
+            {() => {
+              const k = focusKey.get();
+              if (!k) return "";
+              const hex = BigInt(k.slice(k.indexOf(":") + 1)).toString(16);
+              const id = hex.length <= 4 ? hex : hex.slice(-4);
+              return bg(COL.accent)(fg(COL.ink)(bold(` ⊙ focused #${id} ✕ `)));
+            }}
           </Text>
         </Box>
         <Box width="1fr" />
