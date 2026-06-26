@@ -8,7 +8,7 @@
  * (Button → controls.hoverTitle). Labels are thunks over the control signals, so
  * a click repaints the label in place. */
 
-import { Box, Text, bold, fg, bg, computed } from "yeet:tui";
+import { Box, Text, face, computed } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
@@ -21,7 +21,7 @@ import {
   collapse, COLLAPSE_LABELS, cycleAll,
   search, searchActive, startSearch,
   focusKey, clearFocus,
-  tip,
+  titles, tip,
 } from "../controls.js";
 
 export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
@@ -34,13 +34,13 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
     <Box direction="column" height="fit">
       {/* strip 1 — identity + counts + controls */}
       <Box direction="row" height={1} gap={1}>
-        <Text break="none">{bold(fg(COL.title)("wssnoop"))}</Text>
+        <Text break="none" bold fg={COL.title}>wssnoop</Text>
         <Box {...tip("tap status — the SSL_read/SSL_write uprobe state")}>
-          <Text break="none">{() => fg(COL.dim)(status.get())}</Text>
+          <Text break="none" fg={COL.dim}>{() => status.get()}</Text>
         </Box>
         <Box {...tip("live totals — open WebSocket connections · messages decoded")}>
-          <Text break="none">
-            {() => fg(COL.dim)(`${stats.get().conns} ws · ${stats.get().msgs} msgs`)}
+          <Text break="none" fg={COL.dim}>
+            {() => `${stats.get().conns} ws · ${stats.get().msgs} msgs`}
           </Text>
         </Box>
         {/* capture-focus indicator: visible only when the kernel filter is
@@ -55,37 +55,35 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
               if (!k) return "";
               const hex = BigInt(k.slice(k.indexOf(":") + 1)).toString(16);
               const id = hex.length <= 4 ? hex : hex.slice(-4);
-              return bg(COL.accent)(fg(COL.ink)(bold(` ⊙ focused #${id} ✕ `)));
+              return face({ bg: COL.accent, fg: COL.ink, bold: true })(` ⊙ focused #${id} ✕ `);
             }}
           </Text>
         </Box>
         <Box width="1fr" />
         <Button
-          title="search (/) — filters messages while inspecting, connections otherwise"
+          title={titles.search}
           onClick={startSearch}
           active={() => searchActive.get() || !!search.get()}
         >
           {() => (search.get() ? `⌕ ${search.get()}` : "⌕ search")}
         </Button>
-        <Button title="sort connections and groups" onClick={cycleSort}>
+        <Button title={titles.sort} onClick={cycleSort}>
           {() => `sort:${SORT_LABELS[sortKey.get()]}`}
         </Button>
-        <Button title="filter by role (all / client / server)" onClick={cycleRole}>
+        <Button title={titles.role} onClick={cycleRole}>
           {() => `role:${filters.get().role}`}
         </Button>
-        <Button
-          title="show all connections, or only those with traffic in the window"
-          onClick={toggleActive}
-          active={() => filters.get().activeOnly}
-        >
+        <Button title={titles.active} onClick={toggleActive} active={() => filters.get().activeOnly}>
           {() => `idle:${filters.get().activeOnly ? "hidden" : "shown"}`}
         </Button>
-        <Button title="rows shown per process: collapsed / max 12 / all" onClick={cycleAll}>
+        <Button title={titles.rows} onClick={cycleAll}>
           {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
         </Button>
-        <Button title="shorter activity window" onClick={() => cycleViz(-1)}>‹</Button>
-        <Text break="none">{() => [fg(COL.dim)("win "), fg(COL.accent)(RANGE_LABELS[vizRange.get()])]}</Text>
-        <Button title="longer activity window" onClick={() => cycleViz(1)}>›</Button>
+        <Button title={titles.vizDown} onClick={() => cycleViz(-1)}>‹</Button>
+        <Text break="none">
+          {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
+        </Text>
+        <Button title={titles.vizUp} onClick={() => cycleViz(1)}>›</Button>
       </Box>
 
       {/* strip 2 — global aggregate bar */}
@@ -96,7 +94,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           break="none"
           {...tip("ALL — every traced process and connection, combined")}
         >
-          <Text break="none">{bold(fg(COL.accent)("ALL"))}</Text>
+          <Text break="none" bold fg={COL.accent}>ALL</Text>
         </Box>
         {() => (
           <Sparkline
@@ -123,7 +121,9 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           </Box>
         </Box>
         <Box {...tip("ACTIVITY — bytes/sec over the window; upper half = sent, lower = received; brighter = more")}>
-          <Text break="none">{() => fg(COL.header)(`ACTIVITY · last ${RANGE_LABELS[vizRange.get()]} (▀ up / ▄ down)`)}</Text>
+          <Text break="none" fg={COL.header}>
+            {() => `ACTIVITY · last ${RANGE_LABELS[vizRange.get()]} (▀ up / ▄ down)`}
+          </Text>
         </Box>
       </Box>
     </Box>

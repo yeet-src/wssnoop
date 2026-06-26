@@ -15,11 +15,14 @@
  * This file is the seam: parse args, build the session, mount the view.
  *
  * Run (against the demo node server in the VM):
- *   yeet run src/main.jsx -- --pid <node-pid> --bin <ssl-binary>
+ *   yeet run src/main.jsx -- --pid <node-pid> [--bin <ssl-binary>]
  *
  * --bin is where the SSL_read/SSL_write symbols live: a shared OpenSSL
- *   (`libssl.so`, the default) OR an absolute path to a statically-linked
- *   executable. --pid scopes the probe to one process (recommended). */
+ *   (`libssl.so`) OR an absolute path to a statically-linked executable. It is
+ *   optional — omit it and wssnoop discovers the target from the process graph
+ *   (a bare name like `node` is resolved to its exe; with --pid it finds that
+ *   process's mapped libssl, else its exe). See probes/probe.js `resolveBin`.
+ * --pid scopes the probe to one process (recommended). */
 
 import { mount } from "yeet:tui";
 
@@ -36,11 +39,13 @@ import {
   clearSearch,
   typeSearch,
   backspaceSearch,
+  keymap,
 } from "./controls.js";
 
 const args = (typeof yeet !== "undefined" && yeet.args) || {};
 
-const BIN = String(args.bin ?? args.b ?? "libssl.so");
+const binArg = args.bin ?? args.b;
+const BIN = binArg != null ? String(binArg) : undefined; /* undefined ⇒ auto-discover */
 const PID = args.pid != null ? Number(args.pid) : undefined;
 const SECS = Number(args.secs ?? args.s ?? 0); /* 0 = run until quit */
 const DEBUG = parseBool(args.debug ?? args.d);
@@ -79,7 +84,16 @@ tty.on("keydown", (e) => {
     if (isInspecting()) return closeInspector();
     return yeet.exit();
   }
-  if (key.toLowerCase() === "q") yeet.exit();
+  if (key.toLowerCase() === "q") return yeet.exit();
+
+  /* Global-action shortcuts (sort/role/idle/rows/window) — the same actions the
+   * toolbar buttons run, each discoverable via the button's mouseover. Gated to
+   * the table view so they don't fire behind the inspector overlay. */
+  const action = keymap[key];
+  if (action && !isInspecting()) {
+    e.preventDefault?.();
+    action();
+  }
 });
 
 /* The session is a bundle of signals; the BPF tap attaches when the view mounts

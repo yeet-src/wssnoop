@@ -141,7 +141,42 @@ export const clearFocus = () => {
 };
 export const isFocused = (key) => focusKey.get() === key;
 
-export const hoverTitle = signal(""); // current tooltip, shown in the minibuffer
+/* ---- global keymap + self-describing tooltips ------------------------ */
+/* One source of truth for the toolbar's global-action buttons AND the
+ * command-mode keys (main.jsx dispatches `keymap`). Each `titles.*` is a thunk
+ * that names the CURRENT state and the key that changes it — so the mouseover
+ * both reflects state and teaches the shortcut. Stored unresolved in
+ * `hoverTitle` (see `tip`), the minibuffer re-evaluates it every frame, so a
+ * tooltip stays live as its control cycles under the pointer. */
+const next = (arr, v) => arr[(arr.indexOf(v) + 1) % arr.length];
+
+export const titles = {
+  search: () =>
+    searchActive.get() || search.get()
+      ? `search (/) — filtering “${search.get()}”; Esc clears`
+      : "search (/) — filter messages while inspecting, connections otherwise",
+  sort: () => `sort (s) — now ${SORT_LABELS[sortKey.get()]}; press s for ${SORT_LABELS[next(SORTS, sortKey.get())]}`,
+  role: () => `role (r) — now ${filters.get().role}; press r for ${next(ROLES, filters.get().role)}`,
+  active: () =>
+    `idle rows (i) — now ${filters.get().activeOnly ? "hidden" : "shown"}; press i to ${filters.get().activeOnly ? "show" : "hide"} them`,
+  rows: () =>
+    `rows per process (a) — now ${COLLAPSE_LABELS[collapse.get().global]}; press a for ${COLLAPSE_LABELS[next(COLLAPSE_STEPS, collapse.get().global)]}`,
+  vizDown: () => `shorter activity window ([) — now ${RANGE_LABELS[vizRange.get()]}`,
+  vizUp: () => `longer activity window (]) — now ${RANGE_LABELS[vizRange.get()]}`,
+};
+
+/* command-mode key → action. `/`, `q`, and Esc are handled in main.jsx (they
+ * route search / quit / back-out and so aren't plain cycles). */
+export const keymap = {
+  s: cycleSort,
+  r: cycleRole,
+  i: toggleActive,
+  a: cycleAll,
+  "[": () => cycleViz(-1),
+  "]": () => cycleViz(1),
+};
+
+export const hoverTitle = signal(""); // current tooltip (string | thunk), resolved in the minibuffer
 
 /* Transient status line (e.g. "copied 42 messages"). Shown in the minibuffer
  * over the hover tooltip for a moment, then clears itself. A token guards
@@ -157,9 +192,11 @@ export function flash(msg, ms = 2500) {
 }
 
 /* Spreadable hover-tooltip handlers for ANY Box (not just Button): `<Box
- * {...tip("…")}>`. `t` may be a string or a thunk (use a thunk when the text
- * depends on live values, e.g. a connection's current counts). */
+ * {...tip("…")}>`. `t` may be a string or a thunk; we stash it *unresolved* so
+ * the minibuffer re-evaluates it each frame — a thunk over live values (a
+ * connection's counts, a control's current state) then stays current while the
+ * pointer rests on it. */
 export const tip = (t) => ({
-  onMouseEnter: () => hoverTitle.set(typeof t === "function" ? t() : t),
+  onMouseEnter: () => hoverTitle.set(t),
   onMouseLeave: () => hoverTitle.set(""),
 });

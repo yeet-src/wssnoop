@@ -8,15 +8,26 @@
  * design (see controls.js), so the toolbar and the hint share one source.
  */
 
-import { Box, Text, bold, fg, bg, signal } from "yeet:tui";
+import { Box, Text, face, signal } from "yeet:tui";
 
 import { hoverTitle } from "../controls.js";
 import { COL } from "./palette.js";
 
 /* Children and `active` may be plain or thunks — the toolbar's labels and
  * toggle state are live, so we resolve both reactively. `label` reads its thunk
- * inside both the width and the content thunks so the box re-sizes in step. */
+ * inside both the width and the content thunks so the box re-sizes in step.
+ * `title` is passed to `hoverTitle` unresolved (string or thunk) so a
+ * state-naming tooltip stays live while hovered — the minibuffer resolves it. */
 const asText = (c) => (Array.isArray(c) ? c.join("") : `${c ?? ""}`);
+
+/* Three faces: active (filled), hovered (accent), idle (dim). Explicit fg on
+ * idle — a bare `dim` attr vanishes on the dark surface. */
+const faceFor = (active, hovered) =>
+  active
+    ? { bg: COL.accent, fg: COL.ink, bold: true }
+    : hovered
+      ? { fg: COL.accent, bold: true }
+      : { fg: COL.dim };
 
 export default function Button({ title = "", onClick, active = false }, children) {
   const hovered = signal(false);
@@ -35,14 +46,9 @@ export default function Button({ title = "", onClick, active = false }, children
       }}
       setHover={hovered}
     >
-      <Text break="none">
-        {() => {
-          const l = labelOf();
-          if (activeOf()) return bg(COL.accent)(fg(COL.ink)(bold(l)));
-          if (hovered.get()) return bold(fg(COL.accent)(l));
-          return fg(COL.dim)(l); /* explicit fg — bare dim() vanishes on the dark surface */
-        }}
-      </Text>
+      {/* face() applies a runtime-computed patch — the blessed escape hatch for
+          dynamic styling, read inside the thunk so it tracks active/hover. */}
+      <Text break="none">{() => face(faceFor(activeOf(), hovered.get()))(labelOf())}</Text>
     </Box>
   );
 }

@@ -291,7 +291,11 @@ export default function Inspector({ groups, now, size }) {
           </Text>
           <Box width="1fr" height={1} />
           <Button
-            title="focus eBPF capture on just this connection — every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
+            title={() =>
+              isFocused(selected.get())
+                ? "⊙ focused — capture pinned to this connection in the kernel; click to release all connections"
+                : "⊙ focus eBPF capture on just this connection — every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
+            }
             onClick={() => {
               const k = selected.get();
               isFocused(k) ? clearFocus() : setFocus(k);
@@ -301,7 +305,11 @@ export default function Inspector({ groups, now, size }) {
             {() => (isFocused(selected.get()) ? "⊙ focused" : "⊙ focus")}
           </Button>
           <Button
-            title="follow live (newest first) vs. pause to read history — scrolling or expanding pauses automatically"
+            title={() =>
+              frozen.get()
+                ? "❚❚ paused — reading history; click to resume following newest first"
+                : "● live — following newest first; click to pause (scrolling or expanding also pauses)"
+            }
             onClick={togglePause}
             active={() => frozen.get()}
           >
@@ -396,7 +404,11 @@ export default function Inspector({ groups, now, size }) {
           {() =>
             expanded.get() != null ? (
               <Button
-                title="toggle this message between decoded and raw bytes (hex)"
+                title={() =>
+                  raw.get()
+                    ? "⌗ showing raw bytes (hex) — click for the decoded view"
+                    : "⌗ showing the decoded view — click for raw bytes (hex)"
+                }
                 onClick={toggleRaw}
                 active={() => raw.get()}
               >
@@ -406,7 +418,11 @@ export default function Inspector({ groups, now, size }) {
           }
           <Box width="1fr" height={1} />
           <Button
-            title="show / hide the full connection metadata (subprotocol, extensions, origin, opcode histogram, close)"
+            title={() =>
+              details.get()
+                ? "⊖ hide the full connection metadata"
+                : "⊕ show the full connection metadata (subprotocol, extensions, origin, opcode histogram, close)"
+            }
             onClick={toggleDetails}
             active={() => details.get()}
           >
