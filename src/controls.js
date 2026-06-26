@@ -56,8 +56,10 @@ export const clearSearch = () => {
   search.set("");
   searchActive.set(false);
 };
-export const typeSearch = (ch) => search.update((s) => s + ch);
-export const backspaceSearch = () => search.update((s) => s.slice(0, -1));
+/* Editing the query jumps the inspector log back to the top — the filtered set
+ * shrinks, so a stale scroll offset would otherwise sit past its end. */
+export const typeSearch = (ch) => (search.update((s) => s + ch), inspectScroll.set(0));
+export const backspaceSearch = () => (search.update((s) => s.slice(0, -1)), inspectScroll.set(0));
 export const matches = (text, q = search.get()) =>
   !q || (text != null && String(text).toLowerCase().includes(q.toLowerCase()));
 

@@ -35,6 +35,11 @@ import { Inflater } from "yeet:compression";
 export const DIR_READ = 0; /* ingress, server -> client (unmasked) */
 export const DIR_WRITE = 1; /* egress,  client -> server (masked)   */
 
+/* A frame length beyond this is taken as stream desync, not a real frame — it
+ * bounds memory against a corrupt/mid-stream length (well above any real WS
+ * message; the BPF tap itself caps a single SSL call at 16 KB). */
+const MAX_FRAME = 64 * 1024 * 1024;
+
 export const OPCODES = {
   0x0: "CONT",
   0x1: "TEXT",
@@ -117,6 +122,11 @@ export function parseFrame(buf) {
     len = dv.getUint32(0) * 2 ** 32 + dv.getUint32(4);
     off += 8;
   }
+
+  /* A wildly oversized length means the stream is desynced (a mid-stream attach
+   * landed mid-frame, or an SSL* was reused). Signal corruption rather than
+   * buffering gigabytes waiting for bytes that never come. */
+  if (len > MAX_FRAME) return { corrupt: true };
 
   let mask = null;
   if (masked) {
@@ -220,6 +230,9 @@ function inflate6455(s, payload) {
   const cfg = s.deflate || { noContextTakeover: false, windowBits: 15 };
   if (!s.inflater) s.inflater = new Inflater({ windowBits: cfg.windowBits });
   else if (cfg.noContextTakeover) s.inflater.reset();
+  /* RFC-7692 §7.2.2 requires appending 00 00 FF FF before inflating each
+   * message — yeet:compression's Inflater.push does that internally, so we
+   * pass the raw on-wire payload as-is. */
   return s.inflater.push(payload);
 }
 
@@ -399,6 +412,14 @@ export function createDecoder({ debug = false } = {}) {
       if (debug && s.buf.length) out.push(dbg(e, s, "frames"));
       const f = parseFrame(s.buf);
       if (!f) break;
+      /* Desynced length: this stream is unparseable — stop framing it rather
+       * than buffer garbage. (Marked done; an SSL* reuse with a fresh HTTP
+       * handshake still resets via looksHttp above.) */
+      if (f.corrupt) {
+        out.push(ev(e, { type: "truncated", capLen: e.cap_len, len: e.len }));
+        s.phase = "done";
+        break;
+      }
       s.buf = s.buf.slice(f.consumed);
       const msg = onFrame(s, f);
       if (msg) out.push(ev(e, { type: "message", msg }));

@@ -308,7 +308,8 @@ export function createRegistry() {
   /* Drop conns idle past retention, then enforce the hard caps. Returns nothing
    * — mutates the registry. Called from the heartbeat before snapshotting. */
   function evict(now) {
-    for (const [key, c] of conns) {
+    /* Snapshot keys before deleting — don't mutate the Map mid-iteration. */
+    for (const [key, c] of [...conns]) {
       if (c.status === "closed" && c.closedAt != null && now - c.closedAt > CLOSE_GRACE_MS) dropConn(key);
       else if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
     }

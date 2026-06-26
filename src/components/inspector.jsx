@@ -139,7 +139,10 @@ export default function Inspector({ groups, now, size }) {
     copy(toJsonl(m), `copied ${m.length} messages as JSONL → clipboard`);
   };
   const copyOne = (seq) => {
-    const rec = currentMsgs().find((r) => r.seq === seq);
+    /* search the unfiltered set, so "copy msg" still works if a query typed
+     * after expanding would have hidden this message. */
+    const base = frozen.get() ? snap.get() : liveList();
+    const rec = base.find((r) => r.seq === seq);
     if (rec) copy(messageJson(rec), `copied message #${seq} → clipboard`);
   };
 

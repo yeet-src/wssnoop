@@ -8,7 +8,7 @@
  * (Button → controls.hoverTitle). Labels are thunks over the control signals, so
  * a click repaints the label in place. */
 
-import { Box, Text, bold, fg, bg } from "yeet:tui";
+import { Box, Text, bold, fg, bg, computed } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
@@ -25,6 +25,11 @@ import {
 } from "../controls.js";
 
 export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
+  /* The global histogram object is stable (the registry reuses it), but the
+   * `global` signal re-sets a fresh wrapper every heartbeat. Dedupe to the
+   * stable hist so the global Sparkline node isn't re-minted twice a second —
+   * it already reads now/span in its own thunk. */
+  const ghist = computed(() => global.get().hist);
   return (
     <Box direction="column" height="fit">
       {/* strip 1 — identity + counts + controls */}
@@ -89,7 +94,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         </Box>
         {() => (
           <Sparkline
-            hist={global.get().hist}
+            hist={ghist.get()}
             now={now}
             span={span}
             width={sparkWidth(sizeSig.get().cols)}
