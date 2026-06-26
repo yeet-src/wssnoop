@@ -16,21 +16,81 @@ import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
 const inBundle = import.meta.filename.endsWith("/index.jsx");
 const BIN_DIR = inBundle ? "../bin" : "../../bin";
 
+const base = (p) => (p || "").split("/").pop() || "";
+
+/* Resolve the binary that *holds* SSL_read/SSL_write into an attachable target.
+ * The uprobe attach doesn't $PATH-resolve, and SSL lives in different places —
+ * a mapped `libssl.so` for dynamically-linked programs, the executable itself
+ * for statically-linked ones (node, some Python builds). So:
+ *
+ *   - an explicit path ("/usr/bin/node") or library name ("libssl.so") → as-is.
+ *   - a bare program name ("node") → the exe of a running process that matches,
+ *     resolved to an absolute path.
+ *   - nothing, but a --pid is given → that process's mapped libssl, else its exe.
+ *   - nothing and no pid → "libssl.so", the dynamic-linking common case.
+ *
+ * All graph lookups are raced against a short timeout and fall back to
+ * "libssl.so": discovery is a convenience, never a way to wedge startup (a maps
+ * query can be heavy — see YEET-DX-NOTES.md #10). */
+const DEFAULT_BIN = "libssl.so";
+const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
+
+const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
+const race = (p, ms) => Promise.race([p, timeout(ms)]);
+
+/* The SSL-bearing binary for one pid: a mapped libssl wins (dynamic linking),
+ * else the exe (static). */
+async function sslForPid(pid) {
+  const { data } = await yeet.graph.query(`{ proc(pid: ${pid}) { exe maps { path } } }`);
+  const p = data?.proc;
+  if (!p) return null;
+  const lib = (p.maps || []).map((m) => m.path).find((x) => x && /libssl/i.test(x));
+  return lib || p.exe || null;
+}
+
+/* Absolute exe of a running process whose exe-basename or comm matches `name`. */
+async function exeForName(name) {
+  const { data } = await yeet.graph.query(`{ procs { exe stat { comm } } }`);
+  const hit = (data?.procs || []).find((p) => p.exe && (base(p.exe) === name || p.stat?.comm === name));
+  return hit?.exe ?? null;
+}
+
+export async function resolveBin({ bin, pid }) {
+  if (bin && isExplicit(bin)) return bin; // already a path or a library name
+  try {
+    if (!bin && pid != null) {
+      const found = await race(sslForPid(pid), 1500);
+      if (found) return found;
+    } else if (bin) {
+      const found = await race(exeForName(bin), 1500);
+      if (found) return found;
+    }
+  } catch {
+    /* discovery failed/timed out — fall back to the dynamic-linking default */
+  }
+  return DEFAULT_BIN;
+}
+
 /* Attach the SSL_write and SSL_read uprobes in `bin` (scoped to `pid` when
  * given), delivering each plaintext chunk to onEvent(rawEvent) and any
  * transport fault to onError(err). Returns a session whose stop() detaches.
  *
  *   const session = await snoop({ bin, pid, onEvent, onError });
  */
-export async function snoop({ bin, pid, onEvent, onError }) {
+export async function snoop({ bin, pid, onEvent, onError, onBin }) {
   const probe = new BpfObject({
     exe: `${BIN_DIR}/probe.bpf.o`,
     base: import.meta.dirname,
   });
 
+  /* Discover where the SSL symbols live (path / library / process exe) before
+   * attaching; report the resolved target so the UI can show what it hooked. */
+  const target = await resolveBin({ bin, pid });
+  onBin?.(target);
+
   // Each attaches as `kind: "uprobe"`; the daemon reads each program's ELF
   // section to tell entry (SEC("uprobe")) from return (SEC("uretprobe")).
-  const uprobe = { kind: "uprobe", binary: bin, pid };
+  const uprobe = { kind: "uprobe", binary: target, pid };
 
   const control = await probe
     .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })

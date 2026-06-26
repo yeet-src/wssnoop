@@ -312,7 +312,7 @@ export function createRegistry({ onDrop } = {}) {
      * UI shows it stopped rather than a silently-frozen "open" row. */
     if (rec.type === "truncated") {
       c.status = "truncated";
-      c.closeReason = c.closeReason || "capture truncated (SSL call exceeded the 16 KB cap)";
+      c.closeReason = c.closeReason || "capture truncated (SSL call exceeded the 4 KB cap)";
     }
   }
 
@@ -448,14 +448,16 @@ export function createSession({ bin, pid, debug = false } = {}) {
     /* A failed attach (missing BTF, no root, bad bind) becomes a status line
      * rather than an unhandled rejection painted over the screen — the session
      * produces no data and the chrome says why. */
+    let boundBin = null; /* the resolved SSL binary, surfaced in the status line */
     const session = snoop({
       bin,
       pid,
       onEvent,
+      onBin: (t) => (boundBin = t),
       onError: (e) => status.set(`tap fault: ${e && e.message ? e.message : e}`),
     })
       .then((s) => {
-        status.set("tracing");
+        status.set(boundBin ? `tracing · ${boundBin.split("/").pop()}` : "tracing");
         focusFn = s.setFocus; /* enable the capture-focus control */
         syncFocus();
         return s;
