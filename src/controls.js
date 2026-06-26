@@ -69,7 +69,7 @@ export const matches = (text, q = search.get()) =>
  * `cycleAll` advances the default and drops overrides (re-syncs everything);
  * `cycleGroup` advances just one pid. `collapseFor` resolves the effective n. */
 export const COLLAPSE_STEPS = [0, 12, Infinity];
-export const COLLAPSE_LABELS = { 0: "collapsed", 12: "12 rows", [Infinity]: "all rows" };
+export const COLLAPSE_LABELS = { 0: "collapsed", 12: "max 12", [Infinity]: "all" };
 export const collapse = signal({ global: 12, overrides: {} });
 export const collapseFor = (pid) => {
   const c = collapse.get();
@@ -126,8 +126,14 @@ export const isInspecting = () => selected.get() != null;
  * connection silences every other one IN THE KERNEL — targeted, near-zero
  * overhead capture. A UI control, but it really does reach down into eBPF. */
 export const focusKey = signal(null);
-export const setFocus = (key) => focusKey.set(key);
-export const clearFocus = () => focusKey.set(null);
+export const setFocus = (key) => {
+  focusKey.set(key);
+  flash("eBPF capture pinned to this connection — every other one is now silenced in the kernel");
+};
+export const clearFocus = () => {
+  focusKey.set(null);
+  flash("capture focus released — all connections live again");
+};
 export const isFocused = (key) => focusKey.get() === key;
 
 export const hoverTitle = signal(""); // current tooltip, shown in the minibuffer

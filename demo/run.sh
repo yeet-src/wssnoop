@@ -54,9 +54,9 @@ if [[ "${1:-}" == "--attach" ]]; then
   # handshakes. So start the worker processes now with a connect-delay, then
   # attach; they exist (and get hooked) immediately but don't dial out until
   # wssnoop is live.
-  start_workers 5000
+  start_workers 8000
   sleep 1
-  echo ">> workers up (connecting in ~4s); launching wssnoop…"
+  echo ">> workers up (connecting in ~7s); launching wssnoop…"
   cd "$REPO_DIR"
   exec "$YEET" run src/main.jsx -- --bin "$NODE"
 fi

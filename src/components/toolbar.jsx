@@ -68,18 +68,18 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           {() => `role:${filters.get().role}`}
         </Button>
         <Button
-          title="hide connections idle in the window"
+          title="show all connections, or only those with traffic in the window"
           onClick={toggleActive}
           active={() => filters.get().activeOnly}
         >
-          {() => `active:${filters.get().activeOnly ? "on" : "off"}`}
+          {() => `idle:${filters.get().activeOnly ? "hidden" : "shown"}`}
         </Button>
-        <Button title="collapse / expand all groups" onClick={cycleAll}>
+        <Button title="rows shown per process: collapsed / max 12 / all" onClick={cycleAll}>
           {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
         </Button>
-        <Button title="shorter visualization window" onClick={() => cycleViz(-1)}>‹</Button>
-        <Text break="none">{() => fg(COL.accent)(`${RANGE_LABELS[vizRange.get()]}`)}</Text>
-        <Button title="longer visualization window" onClick={() => cycleViz(1)}>›</Button>
+        <Button title="shorter activity window" onClick={() => cycleViz(-1)}>‹</Button>
+        <Text break="none">{() => [fg(COL.dim)("win "), fg(COL.accent)(RANGE_LABELS[vizRange.get()])]}</Text>
+        <Button title="longer activity window" onClick={() => cycleViz(1)}>›</Button>
       </Box>
 
       {/* strip 2 — global aggregate bar */}

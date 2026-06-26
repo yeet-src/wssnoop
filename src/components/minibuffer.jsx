@@ -7,7 +7,8 @@ import { Box, Text, italic, fg } from "yeet:tui";
 import { hoverTitle, toast } from "../controls.js";
 import { COL } from "./palette.js";
 
-const HINT = "hover a control for help · / search · q / Ctrl-C to quit";
+const HINT =
+  "click a connection → inspect · decode · ⊙ focus the kernel · ⧉ copy fixtures    ·    / search · q quit";
 
 export default function Minibuffer() {
   return (

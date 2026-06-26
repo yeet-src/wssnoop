@@ -1,23 +1,38 @@
 # wssnoop demo
 
-A deliberate **test target** for an eBPF-based WebSocket-monitoring tool
-(`wssnoop`). Its only job: generate realistic encrypted WebSocket traffic from
-inside a Lima VM out to the live Polymarket API, so a kernel-side snoop hooking
-OpenSSL `SSL_read`/`SSL_write` uprobes has something genuine to capture.
+A deliberate **test target** for `wssnoop`: it generates realistic encrypted
+WebSocket traffic from inside the Lima VM out to live exchange / prediction-
+market APIs, so the kernel-side snoop hooking OpenSSL `SSL_read`/`SSL_write`
+uprobes has something genuine to capture.
 
-## Run it
+## Run it (headless — the primary demo)
 
 ```sh
-make demo
+./demo/run.sh --attach     # start the traffic AND launch wssnoop attached to it
+./demo/run.sh              # just the traffic; prints the wssnoop attach command
+./demo/run.sh --stop       # stop the workers
 ```
 
-Then open **http://localhost:8080** in your Mac browser.
+Run inside the yeet VM. `run.sh` starts **three worker processes**
+(`order-router`, `md-gateway`, `risk-engine` — `demo/worker.mjs`), each holding
+several live `wss://` connections (Coinbase + Kraken + Polymarket) and
+continuously churning subscriptions and pinging — so wssnoop has rich
+multi-process, multi-connection, bidirectional traffic immediately, no browser.
+Connections recycle on a timer so a mid-stream attach still catches fresh
+handshakes; `--attach` starts the workers first (short connect delay) so wssnoop
+captures every handshake cleanly.
 
-`make demo` is the whole thing: it ensures the `yeet.*` Lima VM is up, installs
-Node (via nvm, one-time) and npm deps inside the VM, starts the Node server in
-the VM bound to `0.0.0.0:8080`, and forwards that port to the macOS host over an
-`ssh -L` tunnel. The command stays in the foreground streaming server logs;
-Ctrl-C stops the server and the tunnel.
+## Run it (browser — alternative)
+
+```sh
+./demo/run-browser.sh      # then open http://localhost:8080
+```
+
+`run-browser.sh` ensures the VM is up, installs Node + deps, starts `server.js`
+(one Polymarket connection driven by a browser UI bound to `0.0.0.0:8080`), and
+forwards that port to the host over an `ssh -L` tunnel. Toggling a market in the
+UI sends subscribe/unsubscribe frames on the outbound `wss://` link — the
+active-subscription signal the snoop detects.
 
 ## Architecture
 

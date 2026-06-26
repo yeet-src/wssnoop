@@ -56,8 +56,18 @@ export default function Root({ size, groups, global, stats, status, clock }) {
           }
 
           if (view.length === 0) {
-            const msg = q ? `  no connections match “${q}”` : "  waiting for WebSocket traffic…";
-            return <Text break="none">{fg(COL.dim)(msg)}</Text>;
+            if (q) return <Text break="none">{fg(COL.dim)(`  no connections match “${q}”`)}</Text>;
+            /* Reassure during the opening dead air: the tap is live, just no
+             * handshake yet. Show the probe status so a failed attach is plain. */
+            return (
+              <Text break="anywhere">
+                {() =>
+                  fg(COL.dim)(
+                    `  ${status.get()} — waiting for the first WebSocket handshake…  (try ./demo/run.sh --attach)`,
+                  )
+                }
+              </Text>
+            );
           }
 
           const groupRank = computed(() => {
