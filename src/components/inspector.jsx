@@ -550,11 +550,12 @@ export default function Inspector({ groups, now, size }) {
 
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
-        {/* the message log with edge-fade scroll affordances: the log fills the
-            full width; a 3-row opacity gradient fades it into the panel at the
-            top edge when there's newer content above (you've scrolled off the
-            live tail) and at the bottom edge when there's older content below.
-            They're z-stacked Layer children, so nothing reflows. */}
+        {/* the message log with two overlay scroll affordances: (1) edge fades —
+            a 3-row opacity gradient fading into the panel at the top edge when
+            there's newer content above and the bottom edge when there's older
+            below, so scrollable-ness is obvious; (2) a translucent rgba scrollbar
+            thumb on the right edge for position. Both are z-stacked Layer children
+            composited over the full-width log, so nothing reflows. */}
         <Box height="1fr" overflow="hidden" onWheel={onWheel}>
           <Layer height="1fr">
             <Box width="1fr" height="1fr" overflow="hidden">
@@ -594,6 +595,32 @@ export default function Inspector({ groups, now, size }) {
                 top > 0 ? <EdgeFade edge="top" /> : null,
                 top + h < n ? <EdgeFade edge="bottom" /> : null,
               ];
+            }}
+            {() => {
+              /* Overlay scrollbar: a translucent rgba thumb on the right edge for
+                 position + proportion. Built as three stacked boxes whose `fr`
+                 weights (before / thumb / after, summing to a constant) flex to
+                 the Layer's real height — no viewH guess. rgba bg so the rightmost
+                 text column shows through, not occluded. The edge fades carry the
+                 "scrollable" cue; this adds where-am-I. Hidden when it all fits. */
+              if (!lookup()) return null;
+              now.get();
+              const n = currentMsgs().length;
+              const h = viewH();
+              if (n <= h) return null;
+              const top = Math.min(Math.max(0, scroll.get()), Math.max(0, n - h));
+              const SCALE = 1000;
+              const thumbFr = Math.max(40, Math.round((h / n) * SCALE));
+              const beforeFr = Math.round((top / (n - h)) * (SCALE - thumbFr));
+              const afterFr = SCALE - thumbFr - beforeFr;
+              const seg = (fr, col) => (fr > 0 ? <Box height={`${fr}fr`} bg={col} /> : null);
+              return (
+                <Box right={0} top={0} bottom={0} width={1} z={2} direction="column">
+                  {seg(beforeFr, COL.scrollTrack)}
+                  {seg(thumbFr, COL.scrollThumb)}
+                  {seg(afterFr, COL.scrollTrack)}
+                </Box>
+              );
             }}
           </Layer>
         </Box>

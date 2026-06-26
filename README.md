@@ -126,7 +126,7 @@ from the host via `/proc/<pid>/root/...`, since Node statically links its TLS).
 ### Attaching to your own process
 
 ```sh
-yeet run src/main.jsx -- --pid <pid> [--bin <ssl-binary>] [--secs N]
+yeet run src/main.jsx -- --pid <pid> [--bin <ssl-binary>]
 ```
 
 `--bin` is **where the `SSL_*` symbols live**:

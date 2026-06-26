@@ -47,7 +47,9 @@ const args = (typeof yeet !== "undefined" && yeet.args) || {};
 const binArg = args.bin ?? args.b;
 const BIN = binArg != null ? String(binArg) : undefined; /* undefined ⇒ auto-discover */
 const PID = args.pid != null ? Number(args.pid) : undefined;
-const SECS = Number(args.secs ?? args.s ?? 0); /* 0 = run until quit */
+/* test-only: exit after N seconds (clean teardown). Named verbosely so it's
+ * never mistaken for a normal run option — the UI otherwise runs until quit. */
+const SECS = Number(args["testonly-exit-after-secs"] ?? 0); /* 0 = run until quit */
 const DEBUG = parseBool(args.debug ?? args.d);
 
 function parseBool(v) {
@@ -106,8 +108,9 @@ try {
   teardown = mount(() => <Bsod error={e} />); // setup threw → show it, don't dump a stack
 }
 
-/* `--secs N` runs for N seconds, then unmounts (tearing the tap down) and exits;
- * otherwise the mounted UI keeps the isolate alive until q / Ctrl-C. */
+/* `--testonly-exit-after-secs N` runs for N seconds, then unmounts (tearing the
+ * tap down) and exits; otherwise the mounted UI keeps the isolate alive until
+ * q / Ctrl-C. For the headless demo/test harness only. */
 if (SECS > 0) {
   await new Promise((r) => setTimeout(r, SECS * 1000));
   teardown();

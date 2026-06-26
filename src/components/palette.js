@@ -28,6 +28,8 @@ export const COL = {
   /* inspector overlay */
   scrim: "#05080dcc", /* translucent wash dimming the list behind the panel */
   panel: "#11161f", /* the panel's opaque surface (a hair above bg)        */
+  scrollTrack: "#586e75bb", /* overlay scrollbar rail — translucent, text shows faintly */
+  scrollThumb: "#268bd2", /* overlay scrollbar thumb — opaque, like a browser overlay  */
   warn: "#dc322f", /* inflate failure / error badge                       */
   snip: "#b58900", /* capture truncated — a calm caution, not an error     */
   ok: "#859900", /* healthy / open status                                */
