@@ -43,7 +43,16 @@ export default function Sparkline({ hist, now, span, width, variant = "conn", ti
 
   const draw = () => {
     if (!hist) return;
-    const { up, down, peak } = hist.window(now.get(), span.get(), w);
+    const s = span.get();
+    /* Snap the right edge to the column grid (colMs = span/w). Without this the
+     * window re-bins every bucket a fraction of a cell each tick, so the bars
+     * shimmer and the newest cell grows-then-resets ("inching"). Snapped, the
+     * chart holds still between ticks and scrolls exactly one cell when time
+     * crosses a column boundary. Only the *view* snaps — recentBytes (window
+     * with cols=1, for sort/activeOnly) still reads the true now. */
+    const colMs = Math.max(1, s / w);
+    const edge = Math.floor(now.get() / colMs) * colMs;
+    const { up, down, peak } = hist.window(edge, s, w);
     const p = Math.max(1, peak);
     for (let c = 0; c < w; c++) {
       chars[c] = GLYPH;
