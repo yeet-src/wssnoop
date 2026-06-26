@@ -22,16 +22,28 @@ import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
 import Button from "./button.jsx";
 import { COL, roleColor } from "./palette.js";
 import { fmtBytes, fmtAgo, hexDump } from "../lib/format.js";
+import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import {
   selected,
   closeInspector,
   tip,
+  flash,
   inspectScroll as scroll,
   inspectExpanded as expanded,
   inspectFrozen as frozen,
   inspectSnap as snap,
 } from "../controls.js";
+
+/* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */
+const copy = (text, note) => {
+  try {
+    tty.clipboard.writeText(text);
+    flash(note);
+  } catch (e) {
+    flash(`copy failed: ${e?.message ?? e}`);
+  }
+};
 
 const RULE = "─".repeat(400);
 const MAX_LINES = 400; /* cap an expanded payload so a huge frame can't run away */
@@ -121,6 +133,18 @@ export default function Inspector({ groups, now, size }) {
   const toggle = (seq) => {
     pause(); /* freeze so the expanded payload stays put long enough to read */
     expanded.set(expanded.get() === seq ? null : seq);
+  };
+
+  /* The message set the user currently sees (frozen snapshot, or live tail). */
+  const currentMsgs = () => (frozen.get() ? snap.get() : liveList());
+  const copyAll = () => {
+    const m = currentMsgs();
+    if (!m.length) return flash("no messages to copy");
+    copy(toJsonl(m), `copied ${m.length} messages as JSONL → clipboard`);
+  };
+  const copyOne = (seq) => {
+    const rec = currentMsgs().find((r) => r.seq === seq);
+    if (rec) copy(messageJson(rec), `copied message #${seq} → clipboard`);
   };
 
   /* One message's preview line — a height-1 clickable row. It is emitted as a
@@ -251,10 +275,27 @@ export default function Inspector({ groups, now, size }) {
           }}
         </Box>
 
+        {/* actions: capture-out to the clipboard (the test-fixture use case) */}
+        <Box direction="row" height={1} gap={1}>
+          <Button
+            title="copy all shown messages as JSON Lines → clipboard (drop straight into a test fixture)"
+            onClick={copyAll}
+          >
+            ⧉ copy all
+          </Button>
+          {() =>
+            expanded.get() != null ? (
+              <Button title="copy this message as JSON → clipboard" onClick={() => copyOne(expanded.get())}>
+                ⧉ copy msg
+              </Button>
+            ) : null
+          }
+        </Box>
+
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
         {/* the message log */}
-        <Box height={() => Math.max(4, size.get().rows - 14)} overflow="hidden" onWheel={onWheel}>
+        <Box height={() => Math.max(4, size.get().rows - 15)} overflow="hidden" onWheel={onWheel}>
           {() => {
             const c = lookup();
             if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;

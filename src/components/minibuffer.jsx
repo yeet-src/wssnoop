@@ -4,7 +4,7 @@
 
 import { Box, Text, italic, fg } from "yeet:tui";
 
-import { hoverTitle } from "../controls.js";
+import { hoverTitle, toast } from "../controls.js";
 import { COL } from "./palette.js";
 
 const HINT = "hover a control for help · q / Ctrl-C to quit";
@@ -13,9 +13,11 @@ export default function Minibuffer() {
   return (
     <Box height={1} overflow="hidden">
       <Text break="none">
-        {/* explicit fg — a bare dim() would inherit the terminal default fg and
-            vanish against the dark surface */}
+        {/* toast (transient) wins over the hover tooltip, which wins over the
+            static hint. Explicit fg — a bare dim() vanishes on the dark surface. */}
         {() => {
+          const flash = toast.get();
+          if (flash) return fg(COL.accent)(flash);
           const t = hoverTitle.get();
           return t ? fg(COL.dim)(t) : italic(fg(COL.header)(HINT));
         }}

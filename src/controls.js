@@ -91,6 +91,19 @@ export const isInspecting = () => selected.get() != null;
 
 export const hoverTitle = signal(""); // current tooltip, shown in the minibuffer
 
+/* Transient status line (e.g. "copied 42 messages"). Shown in the minibuffer
+ * over the hover tooltip for a moment, then clears itself. A token guards
+ * against an older flash clearing a newer one. */
+export const toast = signal("");
+let toastN = 0;
+export function flash(msg, ms = 2500) {
+  toast.set(msg);
+  const n = ++toastN;
+  setTimeout(() => {
+    if (n === toastN) toast.set("");
+  }, ms);
+}
+
 /* Spreadable hover-tooltip handlers for ANY Box (not just Button): `<Box
  * {...tip("…")}>`. `t` may be a string or a thunk (use a thunk when the text
  * depends on live values, e.g. a connection's current counts). */
