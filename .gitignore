@@ -11,3 +11,5 @@
 # kernel-matrix run output (build/kernel-matrix.sh)
 /.kmatrix/
 .demo-shots/
+
+# debug harness scratch (qtest/exittest etc. live in the VM's /tmp)

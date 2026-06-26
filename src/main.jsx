@@ -59,27 +59,6 @@ function parseBool(v) {
   return s === "" || s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
-/* Quit cleanly. Two runtime quirks force the shape here (see YEET-DX-NOTES #22):
- *   1. yeet.exit() unwinds by throwing a sentinel; called *inside* a tty
- *      listener that ALSO ran other JS first, that throw comes back catchable
- *      and the event-emitter's try/catch swallows it ("keydown listener threw:
- *      TypeError: yeet.exit") — so the process never exits. Deferring the exit
- *      to a fresh task (setTimeout) runs it outside that try/catch, where the
- *      throw propagates and the runtime actually exits.
- *   2. yeet.exit() doesn't run from()/lifecycle cleanups, so we unmount first
- *      to release the heartbeat interval + BPF tap (else the live isolate hangs).
- * `teardown` is assigned at mount below; the handler only fires after that. */
-let teardown;
-const quit = () =>
-  setTimeout(() => {
-    try {
-      teardown?.();
-    } catch {
-      /* tearing down on the way out — a teardown throw must not block exit */
-    }
-    yeet.exit();
-  }, 0);
-
 tty.enableMouse(); /* hover tooltips + clickable controls */
 tty.on("keydown", (e) => {
   const key = e.key ?? "";
@@ -105,9 +84,9 @@ tty.on("keydown", (e) => {
   if (e.code === "Escape") {
     if (search.get()) return clearSearch();
     if (isInspecting()) return closeInspector();
-    return quit();
+    return yeet.exit();
   }
-  if (key.toLowerCase() === "q") return quit();
+  if (key.toLowerCase() === "q") return yeet.exit();
 
   /* Global-action shortcuts (sort/role/idle/rows/window) — the same actions the
    * toolbar buttons run, each discoverable via the button's mouseover. Gated to
@@ -122,17 +101,19 @@ tty.on("keydown", (e) => {
 /* The session is a bundle of signals; the BPF tap attaches when the view mounts
  * (the signals get watched) and detaches when it unmounts. */
 const session = createSession({ bin: BIN, pid: PID, debug: DEBUG });
+let teardown;
 try {
   teardown = mount((size) => <Root size={size} {...session} />);
 } catch (e) {
   teardown = mount(() => <Bsod error={e} />); // setup threw → show it, don't dump a stack
 }
 
-/* `--testonly-exit-after-secs N` runs for N seconds, then quits (tearing the tap
- * down) and exits; otherwise the mounted UI keeps the isolate alive until
+/* `--testonly-exit-after-secs N` runs for N seconds, then unmounts (tearing the
+ * tap down) and exits; otherwise the mounted UI keeps the isolate alive until
  * q / Ctrl-C. For the headless demo/test harness only. */
 if (SECS > 0) {
   await new Promise((r) => setTimeout(r, SECS * 1000));
-  quit();
+  teardown();
+  yeet.exit();
 }
 await new Promise(() => {}); // keep the script alive; the TUI owns the screen

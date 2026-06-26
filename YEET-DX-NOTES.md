@@ -134,40 +134,26 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## Runtime / isolate
 
-### 22. `yeet.exit()` from a tty listener is swallowed; it also runs no cleanups **[silent]**
-- **Symptom:** Pressing `q` (the canonical `tty.on("keydown", … yeet.exit())`)
-  prints `keydown listener threw: TypeError: yeet.exit` and `yeet run` hangs —
-  alt-screen restores but the prompt never returns. A *bare* `yeet.exit()` as the
-  only statement in the listener is fine; it breaks once any other JS runs first
-  in the same listener (e.g. an unmount/teardown), or once the isolate holds live
-  async resources (a BPF tap, a `setInterval`).
-- **Cause:** Two compounding runtime issues.
-  1. **The exit sentinel gets caught.** `yeet.exit()` (exit.rs) sets a thread-
-     local `requested=true`, calls `scope.terminate_execution()`, then **throws a
-     catchable `TypeError("yeet.exit")`** to unwind. The event-emitter's `emit`
-     (event_emitter/mixin.js) wraps every listener in `try { cb() } catch (e) {
-     console.error(`${name} listener threw: ${e}`) }`. When the throw arrives
-     catchable, that `try/catch` swallows it — logging the spurious error and
-     clearing the unwind. (Bare, the termination propagates uncatchably and
-     `emit_input_events` (tty/mod.rs) sees `emit.call → None` then
-     `Exit::take_requested()` and exits; with prior JS in the frame the throw is
-     catchable instead, and the post-call `take_requested()` check doesn't save
-     it.)
-  2. **Exit runs no cleanups.** Even when it does exit, `yeet.exit()` never
-     unmounts or fires `from()`/`Effect` teardowns, so a live BPF subscription +
-     heartbeat interval keep the isolate from going idle.
-- **Workaround (what wssnoop does):** `quit()` defers to a fresh task so the
-  throw lands outside the listener's try/catch, and unmounts first to release the
-  tap: `setTimeout(() => { teardown?.(); yeet.exit(); }, 0)`.
-- **Why this is wrong / suggested fix:** A keypress handler calling `yeet.exit()`
-  is *the* documented quit idiom — it must work directly, not only when deferred,
-  and a script shouldn't need an imperative teardown (`from()`/`Effect` cleanups
-  are defined to run when nothing watches them, and exit means nothing watches).
-  Fixes: (a) make the exit unwind uncatchable by JS `try/catch` (or have `emit`
-  re-throw / not catch it when `Exit` is requested); (b) on exit, unmount the
-  live tree / run all registered cleanups; (c) force-exit after a short grace
-  period regardless of pending timers, like `process.exit()`. As-is, "exit" that
-  doesn't exit — and that a stray `try/catch` can eat — is a footgun.
+### 22. RETRACTED — "yeet.exit() hangs / keydown listener threw" was daemon state, not a code bug
+- **What I claimed (wrong):** that `yeet.exit()` from a tty listener gets caught
+  by the event-emitter's try/catch and hangs, and that a live `setInterval`
+  keeps the isolate alive. I built that theory on a daemon I'd **wedged** with
+  heavy run/kill churn (stale isolates piling up, see #11; worker-manager
+  wedging, see #19).
+- **What's actually true (clean daemon):** `tty.on("keydown", () => yeet.exit())`
+  exits cleanly — bare, with a prior `teardown()` in the same listener, with a
+  live `setInterval`, and with the real wssnoop BPF tap. No `keydown listener
+  threw`, no hang, no isolate leak across runs. Verified with the harness
+  (`scripts/wss-harness.sh`) once the daemon was healthy.
+- **Lesson:** the hang and the `keydown listener threw: TypeError: yeet.exit`
+  message are **downstream symptoms of a degraded daemon** (#11 stale jails /
+  #19 wedged worker manager), not an exit/keydown bug. When exit "hangs",
+  reap stale isolates / restart the daemon before theorising. Always confirm a
+  runtime claim against a freshly-restarted daemon.
+- **One real (minor) wart left:** a normal `q` quit exits with **code 1** (the
+  exit unwinds via a thrown sentinel that reaches module top), where 0 would be
+  tidier. Harmless — it does exit. (`exit.rs` throws `TypeError("yeet.exit")`
+  after `terminate_execution()`; that's the documented unwind mechanism.)
 
 ### 4. A hard V8-worker death is uncatchable and paints over the screen **[uncatchable]**
 - **Symptom:** TTY closes with no message after <1 min under load; daemon log
