@@ -59,20 +59,26 @@ function parseBool(v) {
   return s === "" || s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
-/* Quit cleanly: unmount FIRST so the tap's from() cleanup runs (clears the
- * heartbeat interval, unsubscribes the ringbuf, stops the BPF session), THEN
- * exit. Skipping teardown leaves those resources live and the isolate never
- * goes idle, so `yeet run` hangs instead of returning to the prompt. `teardown`
- * is assigned at mount below; the handler only fires after that. */
+/* Quit cleanly. Two runtime quirks force the shape here (see YEET-DX-NOTES #22):
+ *   1. yeet.exit() unwinds by throwing a sentinel; called *inside* a tty
+ *      listener that ALSO ran other JS first, that throw comes back catchable
+ *      and the event-emitter's try/catch swallows it ("keydown listener threw:
+ *      TypeError: yeet.exit") — so the process never exits. Deferring the exit
+ *      to a fresh task (setTimeout) runs it outside that try/catch, where the
+ *      throw propagates and the runtime actually exits.
+ *   2. yeet.exit() doesn't run from()/lifecycle cleanups, so we unmount first
+ *      to release the heartbeat interval + BPF tap (else the live isolate hangs).
+ * `teardown` is assigned at mount below; the handler only fires after that. */
 let teardown;
-const quit = () => {
-  try {
-    teardown?.();
-  } catch {
-    /* tearing down on the way out — a teardown throw must not block exit */
-  }
-  yeet.exit();
-};
+const quit = () =>
+  setTimeout(() => {
+    try {
+      teardown?.();
+    } catch {
+      /* tearing down on the way out — a teardown throw must not block exit */
+    }
+    yeet.exit();
+  }, 0);
 
 tty.enableMouse(); /* hover tooltips + clickable controls */
 tty.on("keydown", (e) => {
