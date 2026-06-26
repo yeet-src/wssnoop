@@ -23,6 +23,10 @@ const arg = (k, d) => {
 
 const ROLE = arg("role", "ws-worker");
 const FEEDS = arg("feeds", "coinbase,kraken,poly").split(",").map((s) => s.trim()).filter(Boolean);
+// Hold off opening connections for --delay ms. Lets a launcher start the worker
+// processes first (so a `--bin <node>` attach, which only hooks processes that
+// already exist, picks them up) and then attach wssnoop before any handshake.
+const DELAY = Number(arg("delay", "0")) || 0;
 process.title = ROLE;
 
 const log = (...a) => console.log(`[${ROLE}]`, ...a);
@@ -139,6 +143,11 @@ class Feed {
 }
 
 // --- main -------------------------------------------------------------------
+
+if (DELAY) {
+  log(`waiting ${DELAY}ms before connecting…`);
+  await new Promise((r) => setTimeout(r, DELAY));
+}
 
 const feeds = [];
 for (const name of FEEDS) {

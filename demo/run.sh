@@ -32,9 +32,12 @@ if [[ "${1:-}" == "--stop" ]]; then stop; echo "stopped demo workers"; exit 0; f
 command -v node >/dev/null || { echo "node not found — is nvm sourced?"; exit 1; }
 npm install --no-audit --no-fund >/dev/null 2>&1 || true
 
+# delay_ms: how long each worker waits before opening its connections. setsid
+# fully detaches them so they outlive the launcher / wssnoop (stop with --stop).
 start_workers() {
+  local delay="${1:-0}"
   for r in "${ROLES[@]}"; do
-    nohup node worker.mjs --role "$r" --feeds coinbase,kraken,poly \
+    setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
       >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
   done
 }
@@ -46,15 +49,19 @@ stop
 sleep 1
 
 if [[ "${1:-}" == "--attach" ]]; then
-  # Start wssnoop first so it captures every handshake; bring the workers up a
-  # beat later (in the background) once the uprobes are attached.
-  ( sleep 3; cd "$DEMO_DIR"; start_workers ) >/dev/null 2>&1 &
-  echo ">> launching wssnoop; workers start in ~3s…"
+  # A `--bin <node>` attach only hooks processes that exist when it attaches, so
+  # the workers must be running first — but we still want wssnoop to catch their
+  # handshakes. So start the worker processes now with a connect-delay, then
+  # attach; they exist (and get hooked) immediately but don't dial out until
+  # wssnoop is live.
+  start_workers 5000
+  sleep 1
+  echo ">> workers up (connecting in ~4s); launching wssnoop…"
   cd "$REPO_DIR"
   exec "$YEET" run src/main.jsx -- --bin "$NODE"
 fi
 
-start_workers
+start_workers 0
 sleep 1
 echo ">> ${#ROLES[@]} workers up: ${ROLES[*]}"
 echo ">> each holds coinbase + kraken + polymarket connections, churning subscriptions"

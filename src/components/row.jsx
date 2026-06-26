@@ -36,11 +36,11 @@ export default function Row({ conn, now, span, width, order, visible }) {
       {...tip(() => `connection #${conn.conn} — click to inspect its messages`)}
     >
       <Box width={LEFT} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
-        <Box width={W_ROLE} overflow="hidden" {...tip(() => roleTip(conn))}>
-          <Text break="none">{() => (now.get(), fg(roleColor(conn.role))(conn.role))}</Text>
+        <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>
+          <Text>{() => (now.get(), fg(roleColor(conn.role))(conn.role))}</Text>
         </Box>
-        <Box width={W_DEST} overflow="ellipsis" {...tip(() => `destination: ${conn.dest}`)}>
-          <Text break="none">{() => (now.get(), fg(COL.dim)(conn.dest))}</Text>
+        <Box width={W_DEST} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
+          <Text>{() => (now.get(), fg(COL.dim)(conn.dest))}</Text>
         </Box>
         <Box
           width={W_MSG}
