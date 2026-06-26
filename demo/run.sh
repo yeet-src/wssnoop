@@ -37,10 +37,8 @@ npm install --no-audit --no-fund >/dev/null 2>&1 || true
 start_workers() {
   local delay="${1:-0}"
   for r in "${ROLES[@]}"; do
-    # Default: no recycle. A connection teardown/reconnect under the SSL_read
-    # uretprobe crashes the yeet V8 worker (runtime defect), and --attach already
-    # gives clean handshakes — so churn buys nothing here. Set RECYCLE=<ms> to
-    # exercise it (e.g. with --egress-only, which is churn-proof).
+    # Default: no recycle — --attach already gives clean handshakes, so steady
+    # feeds make a calmer demo. Set RECYCLE=<ms> to exercise reconnect churn.
     setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
       --recycle "${RECYCLE:-0}" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
       >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
@@ -63,7 +61,7 @@ if [[ "${1:-}" == "--attach" ]]; then
   sleep 1
   echo ">> workers up (connecting in ~7s); launching wssnoop…"
   cd "$REPO_DIR"
-  exec "$YEET" run src/main.jsx -- --bin "$NODE" ${EGRESS:+--egress-only}
+  exec "$YEET" run src/main.jsx -- --bin "$NODE"
 fi
 
 start_workers 0

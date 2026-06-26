@@ -368,7 +368,7 @@ export function createRegistry({ onDrop } = {}) {
   return { ingest, evict, snapshot, focusGone };
 }
 
-export function createSession({ bin, pid, debug = false, egressOnly = false } = {}) {
+export function createSession({ bin, pid, debug = false } = {}) {
   const groups = signal([]);
   const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
@@ -451,12 +451,11 @@ export function createSession({ bin, pid, debug = false, egressOnly = false } = 
     const session = snoop({
       bin,
       pid,
-      egressOnly,
       onEvent,
       onError: (e) => status.set(`tap fault: ${e && e.message ? e.message : e}`),
     })
       .then((s) => {
-        status.set(egressOnly ? "tracing (egress-only)" : "tracing");
+        status.set("tracing");
         focusFn = s.setFocus; /* enable the capture-focus control */
         syncFocus();
         return s;

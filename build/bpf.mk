@@ -32,11 +32,6 @@ BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
 # with `import probe from "../bin/probe.bpf.o"` (the loader's
 # BpfObjectRule matches on that suffix).
 BPF_OUT  := bin/probe.bpf.o
-# A second object from the same source with -DEGRESS_ONLY: it omits the SSL_read
-# uretprobe, which crashes the yeet V8 worker across a connection reconnect
-# (runtime defect). `wssnoop --egress-only` loads this one.
-BPF_EGRESS_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.egress.bpf.o,$(BPF_SRCS))
-BPF_EGRESS_OUT  := bin/probe-egress.bpf.o
 
 BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/bpf/include
 # Add the vendored libbpf program headers (<bpf/bpf_helpers.h>, …) when a
@@ -44,7 +39,7 @@ BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/b
 # it, the build falls back to a host libbpf-dev on the default include path.
 BPF_CFLAGS += $(if $(BPF_SYSINCLUDE),-I$(BPF_SYSINCLUDE))
 
-bpf: $(BPF_OUT) $(BPF_EGRESS_OUT)
+bpf: $(BPF_OUT)
 
 # `| toolchain` (order-only) ensures the vendored clang/bpftool are present in
 # the cache before any rule shells out to them, without forcing rebuilds.
@@ -63,21 +58,11 @@ $(BPF_OUT): $(BPF_OBJS) | bin toolchain
 	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
 	$(BPFTOOL) gen object $@ $(BPF_OBJS)
 
-# The egress-only variant: same units, compiled with -DEGRESS_ONLY.
-.build/bpf/%.egress.bpf.o: src/bpf/%.bpf.c $(VMLINUX) | toolchain
-	@command -v $(CLANG) >/dev/null 2>&1 || { echo "error: clang not found — install clang"; exit 1; }
-	@mkdir -p $(dir $@)
-	$(CLANG) $(BPF_CFLAGS) -DEGRESS_ONLY -c $< -o $@
-
-$(BPF_EGRESS_OUT): $(BPF_EGRESS_OBJS) | bin toolchain
-	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
-	$(BPFTOOL) gen object $@ $(BPF_EGRESS_OBJS)
-
 bin:
 	mkdir -p bin
 
 clean-bpf:
-	rm -rf $(BPF_OUT) $(BPF_EGRESS_OUT) .build $(VMLINUX)
+	rm -rf $(BPF_OUT) .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a

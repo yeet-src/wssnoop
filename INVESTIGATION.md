@@ -1,82 +1,62 @@
-# Crash investigation (the "tty closes <1min" bug)
+# Crash postmortem — "the tty closes (crashes) after <1 min"
 
-Status as of this overnight session. The two paths to capturing traffic are
-**both currently broken**, for reasons below wssnoop itself. Details so you can
-pick up fast.
+**Resolved.** The V8 worker died under live traffic; the daemon logged
+`watchdog] V8 worker died. Respawning worker` with no JS exception (a hard
+process death, not a catchable error), and the TTY closed with no message.
 
-## 1. Full mode crashes the V8 worker (SSL_read uretprobe runtime defect)
+## Root cause: per-event memory pressure, not the uretprobe
 
-**Confirmed with a minimal repro** — not the app, just the BPF object + a
-ringbuf subscriber:
+An earlier pass *mis-attributed* the death to the `SSL_read` uretprobe, because
+an egress-only build (no read probes) survived while a full build crashed. That
+comparison was confounded: the egress object was freshly built at the reduced
+capture size while the full object was the **old 16 KB-per-event build**. The
+real driver was allocation churn — every ringbuf event decodes a whole
+`ssl_event` struct into a JS object, and the per-frame sparklines were
+allocating a fresh `Text`/`Run` tree on every heartbeat.
+
+## The fix (all in this session)
+
+- **`CHUNK` 16384 → 4096** in `wssnoop.bpf.c` — 4× smaller per-event struct, the
+  dominant per-event allocation. Larger SSL calls report `truncated` (the conn
+  is marked) instead of being captured whole.
+- **Sparklines render to a `CellBuffer`** (`components/sparkline.jsx`), not a
+  per-cell `Text` tree — eliminates ~120 object allocations per sparkline per
+  heartbeat, ×13 sparklines on screen.
+- **O(1) circular message ring** (`state.js`) and **drop retained `json`** —
+  parse JSON on demand in the inspector instead of holding it per message.
+- **`decoder.drop(key)`** on connection eviction (`lib/decode.js`) — no
+  per-connection reassembly buffers leaking after a conn closes.
+
+## Verification
+
+Full mode (both uprobes + the `SSL_read` uretprobe active), `RECYCLE=8000`
+(reconnect every ~8 s — the exact churn the old build died on):
 
 ```
-BpfObject(probe.bpf.o)
-  .bind events + focus
-  .attach probe_ssl_write / probe_ssl_read_enter / probe_ssl_read_exit
-  .start(); subscribe(events)
+t+60s  jail=298248 rss=135 MB deaths=0
+t+120s jail=298248 rss=182 MB deaths=0
+t+180s jail=298248 rss=186 MB deaths=0
 ```
 
-With live ingress traffic this **dies within ~5–6s** — the daemon logs
-`WARN yeetd::core::v8::manager::watchdog] V8 worker died. Respawning worker`
-with **no JS exception** beforehand (so it's a hard process death — OOM / native
-fault / watchdog kill — *not* a catchable error). The TTY then closes with no
-message.
+Same jail PID across 3 minutes (no respawn), zero worker deaths, RSS plateaus
+well under the 384 MB heap limit. Unit suite: 70/70.
 
-Findings:
-- It is **the SSL_read uretprobe** (`probe_ssl_read_exit`). Egress-only (no
-  uretprobe) never dies (ran 75s+ clean, 0 deaths).
-- It is **not** reconnect-specific: it crashes under steady ingress with
-  `--recycle 0` (no reconnects) and no Polymarket/gamma HTTPS, just
-  coinbase+kraken tickers.
-- Not OOM in the usual sense: the jail RSS was flat at ~136 MB right up to a
-  death; conn count stabilises (~15), doesn't grow unboundedly.
+## What stays in place
 
-**This is a yeet runtime defect**, not fixable in wssnoop JS. The minimal repro
-above should hand the runtime team a clean reproduction. (`main.jsx` already
-documents it and `--egress-only` is the intended workaround.)
-
-What wssnoop now does about it (this session):
-- `state.js` heartbeat (`publish`) is wrapped in try/catch → a *catchable*
-  fault degrades to a status line instead of taking the worker down.
-- `main.jsx` wraps `mount()` → setup throws show a BSOD (`components/bsod.jsx`)
+- `state.js` heartbeat (`publish`) is wrapped in try/catch → a *catchable* fault
+  degrades to a status line instead of taking the worker down.
+- `main.jsx` wraps `mount()` → a setup throw shows a BSOD (`components/bsod.jsx`)
   instead of a raw stack.
-- A hard worker death still can't be shown from JS (no global error hook in the
-  runtime — checked).
+- A *hard* worker death still can't be surfaced from JS (no global error hook in
+  the runtime). It no longer happens under normal load; if it recurs, the daemon
+  log is the place to look.
 
-## 2. Egress-only is stable but captures **0** events (build defect)
+## Dropped: egress-only mode
 
-`probe-egress.bpf.o` (the `-DEGRESS_ONLY` variant) **attaches cleanly** (status
-reaches "tracing") but captures **0 SSL_write events** over 8–10s while workers
-are actively sending (full mode captures egress fine — we've seen
-subscribe/unsubscribe frames). Verified in isolation:
-
-```
-BpfObject(probe-egress.bpf.o).bind events+focus.attach probe_ssl_write.start()
-subscribe(events) → 0 events in 8s, no error
-```
-
-The source is correct for egress (SSL_write → emit → ringbuf, all outside the
-`#ifndef EGRESS_ONLY`), and a clean `make clean && make bpf` doesn't change it.
-Suspect a `bpftool gen object` relocation issue in the single-program object
-(e.g. `bpf_ringbuf_reserve(&events,…)` resolving to a bad map → returns null →
-`emit` bails silently). Needs kernel-side confirmation (a `bpf_printk` in
-`emit`, or comparing the two objects' map/reloc tables) — couldn't get that far
-with the flaky tmux/daemon in this session.
-
-## Net for the demo
-
-- Neither mode currently gives a reliable *rich* (ingress) demo.
-- If egress-only's capture is fixed, it's the reliable path **and** matches the
-  prospect's stated #1 ("mainly egress … which subscriptions are active") — the
-  subscribe/unsubscribe frames are exactly that.
-- Everything else (UI, decode, inspector, export, search, focus, tests) is solid
-  and verified; this is purely the capture-transport layer.
-
-## Reproduce / debug quickly
-
-```
-# minimal crash repro (full mode): dies ~5s
-# minimal egress 0-capture repro: see the two snippets above
-./demo/run.sh                 # start workers (they send egress continuously)
-make clean && make bpf        # rebuild both objects
-```
+An `-DEGRESS_ONLY` second object (`probe-egress.bpf.o`) was built as a
+crash-workaround. With the crash fixed it was unnecessary, and it had its own
+defect — it captured **0** `SSL_write` events (a single-program
+`bpftool gen object` relocation issue; the full object captures egress fine).
+Removed. The in-kernel **focus filter** (target one `SSL*`/pid, mute the rest
+before the ringbuf reserve) already covers the "zero overhead for everything
+else" story.
