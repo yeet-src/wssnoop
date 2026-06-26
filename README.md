@@ -40,13 +40,20 @@ iteration loop; `make` still bundles it to `src/index.jsx` for shipping.
 src/bpf/wssnoop.bpf.c   the tap: SSL_read/SSL_write uprobes → ringbuf
 src/probes/probe.js     capture: owns the BPF lifecycle, streams raw chunks up
 src/lib/decode.js       data: chunks → handshake + RFC-6455 frames → messages
-src/components/view.jsx present: renders decoded events in a live yeet:tui log
-src/main.jsx            the seam: parse args, wire capture → decode → view
+src/lib/buffer.js       a signal of a sliding window over the last N pushes
+                        (a circular buffer; the rolling log is built on it)
+src/state.js            bind: runs capture → decode as the producer of reactive
+                        signals (a bounded log + cumulative stats)
+src/components/         present: pure UI reading those signals — root (the app
+                        shell), header, footer, row (decoded event → log line)
+src/main.jsx            the seam: parse args, build the session, mount the view
 ```
 
 `probes/` is the only BPF-aware code; `lib/decode.js` is pure data (no
-terminal, no I/O), so the same pipeline could drive a capture-to-disk or a
-test as easily as the TUI.
+terminal, no I/O); `state.js` aggregates the decode stream into `from()`
+signals whose lifecycle is tied to the view being mounted; `components/` never
+see BPF or bytes, only signals. The same pipeline could drive a
+capture-to-disk or a test as easily as the TUI.
 
 ## Build
 

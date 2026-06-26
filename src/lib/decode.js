@@ -20,9 +20,17 @@
  * A Message is the decoded WebSocket message — the thing worth poking at:
  *   { name, opcode, len, payload:Uint8Array,
  *     control?:true,                 // CLOSE/PING/PONG
- *     compressed?:true,              // permessage-deflate; payload left raw
- *     text?:string, json?:any }      // set for uncompressed TEXT frames
+ *     compressed?:true,              // arrived permessage-deflate compressed
+ *     inflateError?:string,          // set (payload left raw) if inflate failed
+ *     text?:string, json?:any }      // set for TEXT frames (after inflation)
+ *
+ * `compressed` records that the frame carried the RSV1 deflate bit; the
+ * `payload`/`len`/`text`/`json` are of the *inflated* message — unless
+ * `inflateError` is set, in which case the raw deflate bytes are left in
+ * `payload` (e.g. a mid-stream attach desynced the LZ77 window).
  */
+
+import { Inflater } from "yeet:compression";
 
 export const DIR_READ = 0; /* ingress, server -> client (unmasked) */
 export const DIR_WRITE = 1; /* egress,  client -> server (masked)   */
@@ -178,6 +186,43 @@ function parseHandshake(buf) {
   return { startLine, headers, isWebSocket, ext, deflate, consumed: term };
 }
 
+/* permessage-deflate (RFC 7692) parameters as they bear on *this* direction's
+ * inflater. The `Sec-WebSocket-Extensions` value names the two halves
+ * separately — `server_*` governs server->client frames (our DIR_READ),
+ * `client_*` governs client->server (DIR_WRITE) — so which set applies depends
+ * on the stream's direction. Returns null when deflate wasn't negotiated. */
+function parseDeflate(ext, dir) {
+  if (!ext) return null;
+  const clause = ext
+    .split(",")
+    .map((s) => s.trim())
+    .find((s) => /^permessage-deflate\b/i.test(s));
+  if (!clause) return null;
+
+  const params = clause.split(";").slice(1).map((s) => s.trim().toLowerCase());
+  const side = dir === DIR_READ ? "server" : "client";
+  const noContextTakeover = params.includes(`${side}_no_context_takeover`);
+  let windowBits = 15;
+  for (const p of params) {
+    const m = /^(server|client)_max_window_bits=(\d+)$/.exec(p);
+    if (m && m[1] === side) windowBits = Math.min(15, Math.max(8, +m[2]));
+  }
+  return { noContextTakeover, windowBits };
+}
+
+/* Inflate one (reassembled) permessage-deflate message payload. One Inflater
+ * per stream either way: with context takeover its LZ77 window persists across
+ * messages; with `*_no_context_takeover` each message stands alone, so we
+ * `reset()` the window first (reusing the native allocation). On failure
+ * (desync from a mid-stream attach, corruption) we degrade to the raw bytes
+ * rather than dropping the message. */
+function inflate6455(s, payload) {
+  const cfg = s.deflate || { noContextTakeover: false, windowBits: 15 };
+  if (!s.inflater) s.inflater = new Inflater({ windowBits: cfg.windowBits });
+  else if (cfg.noContextTakeover) s.inflater.reset();
+  return s.inflater.push(payload);
+}
+
 /* ---- frame -> message assembly -------------------------------------- */
 
 /* Assemble fragmented messages, then surface complete ones. Returns the
@@ -198,17 +243,17 @@ function onFrame(s, f) {
     if (!f.fin) return null;
     const full = s.frag;
     s.frag = null;
-    return finishMessage(full.opcode, full.rsv1, full.chunks);
+    return finishMessage(s, full.opcode, full.rsv1, full.chunks);
   }
 
   if (!f.fin) {
     s.frag = { opcode: f.opcode, rsv1: f.rsv1, chunks: [f.payload] };
     return null;
   }
-  return finishMessage(f.opcode, f.rsv1, [f.payload]);
+  return finishMessage(s, f.opcode, f.rsv1, [f.payload]);
 }
 
-function finishMessage(opcode, rsv1, chunks) {
+function finishMessage(s, opcode, rsv1, chunks) {
   let payload = chunks[0];
   for (let i = 1; i < chunks.length; i++) payload = concat(payload, chunks[i]);
 
@@ -222,7 +267,20 @@ function finishMessage(opcode, rsv1, chunks) {
     json: undefined,
   };
 
-  if (rsv1) return msg; /* compressed — leave bytes raw for now */
+  /* permessage-deflate: the RSV1 bit on the message's first frame marks it
+   * compressed (only data frames, never control). Inflate, then fall through
+   * to the same text/JSON decode as a plain message. */
+  if (rsv1) {
+    try {
+      payload = inflate6455(s, payload);
+      msg.payload = payload;
+      msg.len = payload.length;
+    } catch (e) {
+      msg.inflateError = e && e.message ? e.message : String(e);
+      return msg; /* keep raw deflate bytes in payload */
+    }
+  }
+
   if (opcode === 0x1) {
     msg.text = utf8(payload);
     try {
@@ -237,7 +295,14 @@ function finishMessage(opcode, rsv1, chunks) {
 /* ---- the decoder ----------------------------------------------------- */
 
 function freshState() {
-  return { phase: "handshake", buf: new Uint8Array(0), frag: null, kind: null };
+  return {
+    phase: "handshake",
+    buf: new Uint8Array(0),
+    frag: null,
+    kind: null,
+    deflate: null /* RFC 7692 params for this direction, once negotiated */,
+    inflater: null /* persistent context-takeover inflater, lazily built */,
+  };
 }
 
 /* createDecoder() owns the per-connection state. push(event) ingests one
@@ -289,6 +354,7 @@ export function createDecoder({ debug = false } = {}) {
         const hs = parseHandshake(s.buf);
         if (!hs) return out; /* wait for more */
         s.buf = s.buf.slice(hs.consumed);
+        if (hs.deflate) s.deflate = parseDeflate(hs.ext, e.dir);
         out.push(
           ev(e, {
             type: "handshake",
