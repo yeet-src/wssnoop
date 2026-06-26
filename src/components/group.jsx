@@ -34,7 +34,11 @@ export default function Group({ group, conns, now, span, width, order }) {
     const id = procInfo.get()[pid];
     const cmd = id?.cmdline?.length ? id.cmdline.join(" ") : id?.exe || "";
     const ctr = id?.container ? ` · container ${id.container}` : "";
-    return `process ${pid}${cmd ? ` — ${cmd}` : ""}${ctr} — ${conns.length} WebSocket connection(s)`;
+    const state =
+      id && id.alive === false
+        ? " · STOPPED (process exited — its rows linger until the connections idle out)"
+        : "";
+    return `process ${pid}${cmd ? ` — ${cmd}` : ""}${ctr}${state} — ${conns.length} WebSocket connection(s)`;
   };
 
   const ranks = computed(() => {
@@ -82,11 +86,15 @@ export default function Group({ group, conns, now, span, width, order }) {
             <Text break="none">
               {() => {
                 const id = procInfo.get()[pid];
+                /* A stopped process reads colorless (grey, no accent); the
+                 * mouseover spells out that it exited. */
+                const stopped = id && id.alive === false;
                 const out = [
-                  face({ bold: true, fg: COL.accent })(id?.label ?? `pid ${pid}`),
+                  face(stopped ? { fg: COL.unknown } : { bold: true, fg: COL.accent })(id?.label ?? `pid ${pid}`),
                   face({ fg: COL.dim })(`  pid ${pid}`),
                 ];
-                if (id?.container) out.push(face({ fg: COL.server })(`  ⬢${id.container}`));
+                if (id?.container)
+                  out.push(face({ fg: stopped ? COL.unknown : COL.server })(`  ⬢${id.container}`));
                 return out;
               }}
             </Text>

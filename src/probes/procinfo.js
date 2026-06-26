@@ -54,10 +54,12 @@ const QUERY = (pid) => `{ proc(pid: ${pid}) { cmdline exe stat { comm } cgroups 
 
 const publish = (id) => {
   id.label = procLabel(id) || `pid ${id.pid}`;
+  if (id.alive == null) id.alive = true; /* assume alive until liveness says otherwise */
   info.update((m) => ({ ...m, [id.pid]: id }));
 };
 
 export function resolve(pid) {
+  startLiveness();
   if (pid == null || seen.has(pid)) return;
   seen.add(pid);
   yeet.graph
@@ -77,4 +79,29 @@ export function resolve(pid) {
       );
     })
     .catch(() => publish({ pid, comm: null, cmdline: [], exe: "", container: null }));
+}
+
+/* Liveness — a stopped process keeps its rows until its connections idle out
+ * (a *killed* process never sends a CLOSE, so its conns sit "open" for the full
+ * retention window). Mark such a process so the UI can grey it. One cheap
+ * `procs` query lists every live pid; any pid we've resolved that's absent has
+ * exited. Polled lazily — the timer only starts once a group asks to resolve. */
+let liveTimer = null;
+async function pollLiveness() {
+  if (seen.size === 0) return;
+  try {
+    const { data } = await yeet.graph.query(`{ procs { stat { pid } } }`);
+    const live = new Set((data?.procs ?? []).map((p) => p.stat?.pid).filter((x) => x != null));
+    for (const pid of seen) {
+      const cur = info.get()[pid];
+      if (!cur) continue;
+      const alive = live.has(pid);
+      if (cur.alive !== alive) info.update((m) => ({ ...m, [pid]: { ...cur, alive } }));
+    }
+  } catch {
+    /* a failed poll just leaves the last-known liveness in place */
+  }
+}
+function startLiveness() {
+  if (liveTimer == null) liveTimer = setInterval(() => pollLiveness().catch(() => {}), 4000);
 }
