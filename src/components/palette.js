@@ -28,7 +28,21 @@ export const COL = {
   scrim: "#05080dcc", /* translucent wash dimming the list behind the panel */
   panel: "#11161f", /* the panel's opaque surface (a hair above bg)        */
   warn: "#dc322f", /* inflate failure / error badge                       */
+  ok: "#859900", /* healthy / open status                                */
+
+  /* JSON syntax highlighting (expanded payloads) */
+  json: {
+    key: "#268bd2", /* "key":      */
+    str: "#859900", /* "value"     */
+    num: "#2aa198", /* 123         */
+    lit: "#b58900", /* true/null   */
+    punct: "#586e75", /* { } [ ] , : */
+    text: "#93a1a1",
+  },
 };
+
+/* JSON token kind → color, for highlightable payload lines. */
+export const jsonColor = (kind) => COL.json[kind] ?? COL.json.text;
 
 export const roleColor = (role) =>
   role === "client" ? COL.client : role === "server" ? COL.server : COL.unknown;

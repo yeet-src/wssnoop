@@ -231,37 +231,55 @@ function inflate6455(s, payload) {
 function onFrame(s, f) {
   const name = OPCODES[f.opcode] || `0x${f.opcode.toString(16)}`;
 
-  /* Control frames (8/9/A) are standalone and never fragmented. */
+  /* Control frames (8/9/A) are standalone and never fragmented. CLOSE carries a
+   * 2-byte big-endian status code + optional UTF-8 reason. */
   if (f.opcode >= 0x8) {
-    return { name, opcode: f.opcode, control: true, len: f.len, payload: f.payload };
+    const msg = {
+      name, opcode: f.opcode, control: true,
+      len: f.len, wireLen: f.len, frames: 1, fin: f.fin, masked: f.masked, rsv1: f.rsv1,
+      payload: f.payload, text: null, json: undefined,
+    };
+    if (f.opcode === 0x8 && f.payload.length >= 2) {
+      msg.closeCode = (f.payload[0] << 8) | f.payload[1];
+      msg.closeReason = f.payload.length > 2 ? utf8(f.payload.subarray(2)) : "";
+    }
+    return msg;
   }
 
   /* Data frames: opcode 0x1/0x2 start a message; 0x0 continues it. */
   if (f.opcode === 0x0) {
     if (!s.frag) return null; /* stray continuation — ignore */
     s.frag.chunks.push(f.payload);
+    s.frag.masked = s.frag.masked || f.masked;
     if (!f.fin) return null;
     const full = s.frag;
     s.frag = null;
-    return finishMessage(s, full.opcode, full.rsv1, full.chunks);
+    return finishMessage(s, full.opcode, full.rsv1, full.chunks, full.masked);
   }
 
   if (!f.fin) {
-    s.frag = { opcode: f.opcode, rsv1: f.rsv1, chunks: [f.payload] };
+    s.frag = { opcode: f.opcode, rsv1: f.rsv1, chunks: [f.payload], masked: f.masked };
     return null;
   }
-  return finishMessage(s, f.opcode, f.rsv1, [f.payload]);
+  return finishMessage(s, f.opcode, f.rsv1, [f.payload], f.masked);
 }
 
-function finishMessage(s, opcode, rsv1, chunks) {
+function finishMessage(s, opcode, rsv1, chunks, masked) {
   let payload = chunks[0];
   for (let i = 1; i < chunks.length; i++) payload = concat(payload, chunks[i]);
 
+  /* `wireLen` is the on-wire size (still compressed when rsv1); `len` becomes
+   * the inflated size below. Their ratio is the per-message compression. */
   const msg = {
     name: OPCODES[opcode] || `0x${opcode.toString(16)}`,
     opcode,
     compressed: rsv1,
+    wireLen: payload.length,
     len: payload.length,
+    frames: chunks.length,
+    masked: !!masked,
+    fin: true,
+    rsv1,
     payload,
     text: null,
     json: undefined,

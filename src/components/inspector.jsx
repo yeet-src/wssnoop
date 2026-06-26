@@ -20,8 +20,8 @@
 import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
 
 import Button from "./button.jsx";
-import { COL, roleColor } from "./palette.js";
-import { fmtBytes, fmtAgo, hexDump } from "../lib/format.js";
+import { COL, roleColor, jsonColor } from "./palette.js";
+import { fmtBytes, fmtAgo, hexDump, jsonTokens } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import {
@@ -35,6 +35,10 @@ import {
   inspectExpanded as expanded,
   inspectFrozen as frozen,
   inspectSnap as snap,
+  inspectDetails as details,
+  inspectRaw as raw,
+  toggleDetails,
+  toggleRaw,
 } from "../controls.js";
 
 /* Everything a free-text query tests a message against. */
@@ -75,29 +79,6 @@ function preview(rec) {
 }
 
 const oneLine = (s) => (s == null ? "" : s.replace(/\s+/g, " ").trim());
-
-/* The expanded payload as plain text lines: pretty JSON, raw text, or a hex
- * dump for binary / undecodable frames. Returns { warn?, lines }. */
-function payloadLines(rec) {
-  if (rec.inflateError) {
-    return {
-      warn: `⚠ inflate failed: ${rec.inflateError} — showing raw deflate bytes`,
-      lines: hexDump(rec.bytes).split("\n"),
-    };
-  }
-  if (rec.json !== undefined) return { lines: pretty(rec.json).split("\n") };
-  if (rec.text != null) return { lines: rec.text.split("\n") };
-  if (rec.bytes) return { lines: hexDump(rec.bytes).split("\n") };
-  return { lines: [rec.control ? `(${rec.name} frame, no payload)` : "(no payload)"] };
-}
-
-const pretty = (j) => {
-  try {
-    return JSON.stringify(j, null, 2);
-  } catch {
-    return String(j);
-  }
-};
 
 export default function Inspector({ groups, now, size }) {
   let count = 0; /* messages last rendered — clamps the wheel */
@@ -192,15 +173,64 @@ export default function Inspector({ groups, now, size }) {
     </Box>
   );
 
+  /* Frame-health line above an expanded payload: size + per-message compression,
+   * fragmentation, masking correctness (client egress must be masked, server
+   * ingress must not), and any close code/reason. */
+  const healthLine = (rec) => {
+    const out = [fg(COL.dim)(`${rec.name} · ${fmtBytes(rec.len)}`)];
+    if (rec.compressed && rec.wireLen > 0) {
+      const ratio = rec.len / rec.wireLen;
+      out.push(fg(COL.in)(` ⚙ wire ${fmtBytes(rec.wireLen)} · ${ratio.toFixed(1)}×`));
+    }
+    if (rec.frames > 1) out.push(fg(COL.dim)(` · ${rec.frames} frames`));
+    const maskOk = rec.dir === DIR_WRITE ? rec.masked : !rec.masked;
+    out.push(maskOk ? fg(COL.dim)(" · mask ✓") : fg(COL.warn)(" · mask ✗"));
+    if (rec.closeCode != null)
+      out.push(fg(COL.warn)(` · close ${rec.closeCode}${rec.closeReason ? ` "${rec.closeReason}"` : ""}`));
+    return out;
+  };
+
+  /* One JSON line → highlighted spans (or a literal space for a blank line). */
+  const jsonLine = (l) => (l === "" ? " " : jsonTokens(l).map((t) => fg(jsonColor(t.kind))(t.text)));
+
+  /* The expanded payload. `raw` forces a hex view even when the message decoded;
+   * otherwise JSON is syntax-highlighted, text shown plain, binary/undecodable
+   * as hex. */
   const Payload = (rec) => {
-    const { warn, lines } = payloadLines(rec);
+    const showRaw = raw.get();
+    let kind, warn = null, lines;
+    if (rec.inflateError) {
+      warn = `⚠ inflate failed: ${rec.inflateError} — raw deflate bytes`;
+      lines = hexDump(rec.bytes).split("\n");
+      kind = "hex";
+    } else if (showRaw) {
+      lines = hexDump(rec.bytes).split("\n");
+      kind = "hex";
+    } else if (rec.json !== undefined) {
+      lines = JSON.stringify(rec.json, null, 2).split("\n");
+      kind = "json";
+    } else if (rec.text != null) {
+      lines = rec.text.split("\n");
+      kind = "text";
+    } else if (rec.bytes) {
+      lines = hexDump(rec.bytes).split("\n");
+      kind = "hex";
+    } else {
+      lines = [rec.control ? `(${rec.name} frame, no payload)` : "(no payload)"];
+      kind = "text";
+    }
     const shown = lines.slice(0, MAX_LINES);
     return (
       <Box direction="column" height="fit" padding={[0, 0, 1, 3]}>
+        <Text break="none">{healthLine(rec)}</Text>
         {warn ? <Text break="anywhere">{fg(COL.warn)(warn)}</Text> : null}
-        {shown.map((l) => (
-          <Text break="anywhere">{fg(COL.ink)(l === "" ? " " : l)}</Text>
-        ))}
+        {shown.map((l) =>
+          kind === "json" ? (
+            <Text break="anywhere">{jsonLine(l)}</Text>
+          ) : (
+            <Text break="anywhere">{fg(kind === "hex" ? COL.dim : COL.ink)(l === "" ? " " : l)}</Text>
+          ),
+        )}
         {lines.length > MAX_LINES ? (
           <Text break="none">{italic(fg(COL.header)(`… ${lines.length - MAX_LINES} more lines`))}</Text>
         ) : null}
@@ -259,35 +289,68 @@ export default function Inspector({ groups, now, size }) {
           </Button>
         </Box>
 
-        {/* detail lines */}
+        {/* detail lines — two compact always-on lines plus an expandable block
+            ("details") that surfaces every negotiated/lifecycle dimension. */}
         <Box direction="column" height="fit" break="none">
           {() => {
             const c = lookup();
             if (!c) return <Text break="anywhere">{fg(COL.dim)("It is no longer in the registry.")}</Text>;
             const n = now.get();
-            const df = c.deflate
-              ? `permessage-deflate (window ${c.deflate.windowBits}b${c.deflate.noContextTakeover ? ", no-takeover" : ""})`
-              : "none";
-            return [
-              <Text break="anywhere">{fg(COL.dim)(`dest  ${c.dest}`)}</Text>,
+            const more = details.get();
+            const stat = c.status === "closed" ? fg(COL.warn) : fg(COL.ok);
+            const ratio = c.wireBytes > 0 ? c.inflatedBytes / c.wireBytes : 0;
+            const lines = [
+              <Text break="anywhere">
+                {[
+                  fg(COL.dim)("status "),
+                  stat(c.status === "closed" ? "✕ closed" : "● open"),
+                  fg(COL.dim)(" · "),
+                  fg(roleColor(c.role))(c.role),
+                  fg(COL.dim)(` · ${c.dest}`),
+                ]}
+              </Text>,
               <Text break="none">
                 {[
-                  fg(COL.dim)(`open  ${fmtAgo(n - c.startedAt)} · `),
+                  fg(COL.dim)(`opened ${fmtAgo(n - c.startedAt)} · `),
                   fg(COL.out)(`${c.msgUp}↑`),
                   fg(COL.dim)(" "),
                   fg(COL.in)(`${c.msgDn}↓`),
-                  fg(COL.dim)(` msgs · `),
+                  fg(COL.dim)(" · "),
                   fg(COL.out)(fmtBytes(c.hist.totalUp)),
                   fg(COL.dim)(" / "),
                   fg(COL.in)(fmtBytes(c.hist.totalDown)),
+                  ratio ? fg(COL.in)(` · ⚙ ${ratio.toFixed(1)}×`) : "",
                 ]}
               </Text>,
-              <Text break="anywhere">{fg(COL.dim)(`zip   ${df}`)}</Text>,
             ];
+            if (more) {
+              const row = (k, v) => (
+                <Text break="anywhere">{[fg(COL.header)(k.padEnd(9)), fg(COL.dim)(v || "—")]}</Text>
+              );
+              const ops = Object.entries(c.opcodes)
+                .map(([k, v]) => `${k} ${v}`)
+                .join(" · ");
+              lines.push(
+                row(
+                  "deflate",
+                  c.deflate
+                    ? `permessage-deflate · window ${c.deflate.windowBits}b${c.deflate.noContextTakeover ? " · no-takeover" : ""}`
+                    : "none",
+                ),
+                row("subproto", c.subprotocol),
+                row("ext", c.extensions),
+                row("origin", c.origin),
+                row("agent", c.headers["user-agent"]),
+                row("opcodes", ops),
+              );
+              if (c.closeCode != null)
+                lines.push(row("close", `${c.closeCode}${c.closeReason ? ` "${c.closeReason}"` : ""}`));
+            }
+            return lines;
           }}
         </Box>
 
-        {/* actions: capture-out to the clipboard (the test-fixture use case) */}
+        {/* actions: capture-out (test fixtures) + discoverability toggles */}
         <Box direction="row" height={1} gap={1}>
           <Button
             title="copy all shown messages as JSON Lines → clipboard (drop straight into a test fixture)"
@@ -302,16 +365,36 @@ export default function Inspector({ groups, now, size }) {
               </Button>
             ) : null
           }
+          {() =>
+            expanded.get() != null ? (
+              <Button
+                title="toggle this message between decoded and raw bytes (hex)"
+                onClick={toggleRaw}
+                active={() => raw.get()}
+              >
+                {() => (raw.get() ? "⌗ raw" : "⌗ decoded")}
+              </Button>
+            ) : null
+          }
+          <Box width="1fr" height={1} />
+          <Button
+            title="show / hide the full connection metadata (subprotocol, extensions, origin, opcode histogram, close)"
+            onClick={toggleDetails}
+            active={() => details.get()}
+          >
+            {() => (details.get() ? "⊖ details" : "⊕ details")}
+          </Button>
         </Box>
 
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
         {/* the message log */}
-        <Box height={() => Math.max(4, size.get().rows - 15)} overflow="hidden" onWheel={onWheel}>
+        <Box height="1fr" overflow="hidden" onWheel={onWheel}>
           {() => {
             const c = lookup();
             if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;
             now.get(); /* refresh the tail each heartbeat while following live */
+            raw.get(); /* re-render the expanded payload when raw/decoded flips */
             const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
             count = all.length;
             if (count === 0) {

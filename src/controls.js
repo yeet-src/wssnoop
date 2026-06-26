@@ -97,6 +97,10 @@ export const inspectScroll = signal(0); // index of the topmost shown message
 export const inspectExpanded = signal(null); // seq of the message whose payload is open
 export const inspectFrozen = signal(false); // paused (reading history) vs. following live
 export const inspectSnap = signal([]); // frozen snapshot of messages while paused
+export const inspectDetails = signal(false); // connection metadata expanded (hidden by default)
+export const inspectRaw = signal(false); // show an expanded payload as raw hex vs decoded
+export const toggleDetails = () => inspectDetails.update((v) => !v);
+export const toggleRaw = () => inspectRaw.update((v) => !v);
 
 export const inspect = (key) => {
   selected.set(key);
@@ -104,6 +108,8 @@ export const inspect = (key) => {
   inspectScroll.set(0);
   inspectExpanded.set(null);
   inspectSnap.set([]);
+  inspectDetails.set(false);
+  inspectRaw.set(false);
   clearSearch(); /* the query is context-scoped (messages vs connections) */
 };
 export const closeInspector = () => {

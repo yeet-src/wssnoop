@@ -40,6 +40,7 @@ import { snoop } from "./probes/probe.js";
 /* Idle eviction matches the max viz range — a conn silent longer than the
  * longest sparkline window can show carries no visible data, so drop it. */
 const RETENTION_MS = 1_800_000; // 30 min == the longest viz window (900 buckets * 2s)
+const CLOSE_GRACE_MS = 20_000; // keep a closed conn visible briefly, then drop it
 const HEARTBEAT_MS = 500;
 
 /* Hard memory backstop on top of idle eviction (a pathological host could open
@@ -104,7 +105,11 @@ function deriveRoleDest(hs) {
   return { role: "server", dest: "?" };
 }
 
-/* A fresh Conn, role/dest unknown until a handshake teaches us otherwise. */
+/* A fresh Conn, role/dest unknown until a handshake teaches us otherwise. The
+ * extra fields are the discoverable metadata the inspector surfaces: negotiated
+ * identity (headers/subprotocol/extensions/origin), lifecycle status + close
+ * detail, and running aggregates (opcode histogram, on-wire vs inflated bytes
+ * for the compression ratio). */
 function freshConn(pid, ssl, now) {
   return {
     key: `${pid}:${ssl}`,
@@ -114,10 +119,21 @@ function freshConn(pid, ssl, now) {
     role: "?",
     dest: "?",
     deflate: null, /* RFC-7692 params, once a handshake negotiates them */
+    headers: {}, /* merged handshake headers (both directions) */
+    subprotocol: null,
+    extensions: null,
+    origin: null,
+    status: "open", /* open → closing → closed (from a CLOSE frame) */
+    closeCode: null,
+    closeReason: null,
+    closedAt: null,
     startedAt: now,
     lastActiveAt: now,
     msgUp: 0,
     msgDn: 0,
+    opcodes: {}, /* name -> count */
+    wireBytes: 0, /* on-wire (compressed) data bytes */
+    inflatedBytes: 0, /* decoded data bytes — ratio gives the compression */
     hist: createTimeHist(),
     msgs: createMsgRing(MSG_CAP), /* decoded scrollback for the inspector */
   };
@@ -136,12 +152,20 @@ function retainMsg(c, dir, m, now) {
     name: m.name,
     opcode: m.opcode,
     len: m.len,
+    wireLen: m.wireLen ?? m.len, /* on-wire (compressed) size */
+    frames: m.frames ?? 1, /* fragmentation: frames per message */
+    masked: !!m.masked,
+    fin: m.fin !== false,
     control: !!m.control,
     compressed: !!m.compressed,
     inflateError: m.inflateError || null,
+    closeCode: m.closeCode ?? null,
+    closeReason: m.closeReason ?? null,
     text: m.text ?? null,
     json: m.json,
-    bytes: m.text == null && m.payload ? m.payload.slice(0, RAW_CAP) : null,
+    /* raw payload bytes (capped) kept for every message so the inspector can
+     * show a hex view even when the message decoded cleanly. */
+    bytes: m.payload ? m.payload.slice(0, RAW_CAP) : null,
   };
 }
 
@@ -231,6 +255,12 @@ export function createRegistry() {
     if (rec.type === "handshake") {
       if (rec.startedAt == null) c.startedAt = c.startedAt || now;
       if (rec.deflate && !c.deflate) c.deflate = rec.deflate; /* either direction */
+      if (rec.headers) {
+        c.headers = { ...c.headers, ...rec.headers }; /* merge request + 101 response */
+        c.subprotocol = c.headers["sec-websocket-protocol"] ?? c.subprotocol;
+        c.extensions = c.headers["sec-websocket-extensions"] ?? c.extensions;
+        c.origin = c.headers["origin"] ?? c.origin;
+      }
       const rd = deriveRoleDest(rec);
       if (rd) {
         c.role = rd.role;
@@ -252,7 +282,22 @@ export function createRegistry() {
         addFlow(c, g, now, DOWN, bytes);
       }
       globalMsgs += 1;
-      if (m) c.msgs.push(retainMsg(c, rec.dir, m, now));
+      if (m) {
+        c.opcodes[m.name] = (c.opcodes[m.name] || 0) + 1;
+        if (!m.control) {
+          c.wireBytes += Number(m.wireLen) || 0;
+          c.inflatedBytes += Number(m.len) || 0;
+        }
+        /* A CLOSE frame moves the connection to closed; record the code/reason
+         * and stamp closedAt so the row briefly shows the lifecycle end. */
+        if (m.opcode === 0x8) {
+          c.status = "closed";
+          c.closeCode = m.closeCode ?? c.closeCode;
+          c.closeReason = m.closeReason ?? c.closeReason;
+          c.closedAt = now;
+        }
+        c.msgs.push(retainMsg(c, rec.dir, m, now));
+      }
       return;
     }
 
@@ -263,7 +308,8 @@ export function createRegistry() {
    * — mutates the registry. Called from the heartbeat before snapshotting. */
   function evict(now) {
     for (const [key, c] of conns) {
-      if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
+      if (c.status === "closed" && c.closedAt != null && now - c.closedAt > CLOSE_GRACE_MS) dropConn(key);
+      else if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
     }
     if (conns.size > MAX_CONNS) {
       const order = [...conns.values()].sort((a, b) => a.lastActiveAt - b.lastActiveAt);
