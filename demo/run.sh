@@ -79,6 +79,7 @@ done
 NODE="$(command -v node 2>/dev/null || true)"
 YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
 CTR_NAME="wssnoop-demo"
+PIDFILE="/tmp/wssnoop-demo.pids" # the exact worker pids this script started
 
 # Docker usually needs sudo here (the socket is root:docker); pick whichever
 # invocation can reach the daemon. Sets $DKR for use as `$DKR <args>`.
@@ -103,12 +104,35 @@ reap_jails() {
     | while read -r id; do echo ">> killing wssnoop isolate $id"; "$YEET" kill "$id" >/dev/null 2>&1 || true; done
 }
 
+# True iff $1 is a pid of one of OUR demo workers. worker.mjs sets
+# process.title=$role, so a worker's comm is exactly the role name; that's our
+# marker. A precise identity check, not a command-line substring match.
+is_demo_worker() {
+  local c r; c="$(cat "/proc/$1/comm" 2>/dev/null)" || return 1
+  for r in "${ROLES[@]}"; do [[ "$c" == "$r" ]] && return 0; done
+  return 1
+}
+
 # Stop only the demo TRAFFIC — the worker processes and the demo container. It
 # deliberately does NOT touch wssnoop isolates (that's the user's viewer; quit
 # it with `q`). Use `reap` to clear a leftover viewer from a crashed terminal.
+#
+# We kill ONLY processes this script started (their pids, in $PIDFILE) and
+# re-verify each is still a demo worker before signalling it, so PID reuse can't
+# make us kill something else. There is deliberately NO `pkill -f worker.mjs`:
+# `-f` matches a substring of EVERY process's full command line, so it would
+# also kill the shell running this script, an editor/tmux, or a wssnoop you're
+# viewing if any of them merely mentions a worker path — that was the bug. The
+# only pattern match kept is `pkill -x <role>` (exact comm, demo-specific names)
+# to sweep orphans from a run whose pidfile was lost.
 stop() {
+  if [[ -f "$PIDFILE" ]]; then
+    while read -r pid; do
+      [[ -n "$pid" ]] && is_demo_worker "$pid" && kill "$pid" 2>/dev/null || true
+    done < "$PIDFILE"
+    rm -f "$PIDFILE"
+  fi
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
-  pkill -f "worker.mjs" 2>/dev/null || true
   if have_docker; then $DKR rm -f "$CTR_NAME" >/dev/null 2>&1 || true; fi
 }
 
@@ -180,12 +204,15 @@ npm install --no-audit --no-fund >/dev/null 2>&1 || true
 # fully detaches them so they outlive the launcher / wssnoop (stop with --stop).
 start_workers() {
   local delay="${1:-0}"
+  : > "$PIDFILE" # record exactly the pids we start, so stop() targets only them
   for r in "${ROLES[@]}"; do
     # Default: no recycle — --attach already gives clean handshakes, so steady
     # feeds make a calmer demo. Pass --recycle <ms> to exercise reconnect churn.
+    # setsid execs node in place, so $! is the node worker's own pid.
     setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
       --recycle "$RECYCLE" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
       >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
+    echo "$!" >> "$PIDFILE"
   done
 }
 
