@@ -90,6 +90,25 @@ reality · **[uncatchable]** can't be handled from JS.
 - **Suggested fix:** Measure container intrinsics with the same `displayWidth`
   the renderer paints with, so slot width == painted width.
 
+### 21. A function `bg` (the `(x,y,w,h)=>color` shader) silently doesn't paint **[silent]**
+- **Symptom:** `<Box bg={(x,y,w,h)=>...}/>` rendered with **no fill** — the cells
+  kept the surface color underneath, as if `bg` were absent. No error. A static
+  string `bg` (incl. 8-digit `#RRGGBBAA` rgba) on the same box paints fine.
+  Wanted a 1-col scrollbar whose thumb/track varied by row via the shader; the
+  column stayed the panel color (verified by reading the captured `48;2;r;g;b`).
+- **Cause:** Unconfirmed — `props()` passes a function `bg` through as a raw
+  shader fn (not unwrapped like a signal), but the paint pass doesn't appear to
+  invoke it (or expects a different arity/return). The docs advertise
+  `bg: color | (x,y,w,h)=>color`, so this is a doc-vs-behavior gap at minimum.
+- **Workaround:** Don't compute a per-cell fill via the shader. Build the
+  gradient/segments from real boxes instead — wssnoop's overlay scrollbar is
+  three stacked boxes with `fr` weights (before/thumb/after) so it flexes to the
+  container's real height, each with a plain string `bg`. Static rgba strings
+  composite correctly over text (a translucent bg dims the glyph beneath), which
+  is the whole reason the shader wasn't needed.
+- **Suggested fix:** Either make the shader form actually paint, or drop it from
+  the `bg` docs/types so callers don't reach for it.
+
 ### 20. A `CellBuffer` is not occluded by boxes drawn over it **[silent]**
 - **Symptom:** An opaque, higher-`z` `Box` (with `bg` + `border`) placed over a
   `CellBuffer` does **not** hide it — the buffer's glyphs bleed through the
