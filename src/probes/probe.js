@@ -14,31 +14,40 @@ import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
 // (`yeet run src/main.jsx`), this file stays at src/probes/ (dirname one
 // deeper, so ../../bin). Detect the bundle by its entry filename.
 const inBundle = import.meta.filename.endsWith("/index.jsx");
-const probe = new BpfObject({
-  exe: inBundle ? "../bin/probe.bpf.o" : "../../bin/probe.bpf.o",
-  base: import.meta.dirname,
-});
+const BIN_DIR = inBundle ? "../bin" : "../../bin";
 
-/* Attach the SSL_read/SSL_write uprobes in `bin` (scoped to `pid` when
- * given), delivering each plaintext chunk to onEvent(rawEvent) and any
- * transport fault to onError(err). Returns a session whose stop() detaches.
+/* Attach the SSL_write (and, unless `egressOnly`, SSL_read) uprobes in `bin`
+ * (scoped to `pid` when given), delivering each plaintext chunk to
+ * onEvent(rawEvent) and any transport fault to onError(err). Returns a session
+ * whose stop() detaches.
  *
- *   const session = await snoop({ bin, pid, onEvent, onError });
- *   ...
- *   await session.stop();
+ * `egressOnly` loads the egress-only object (no SSL_read uretprobe): a uretprobe
+ * firing across a connection teardown/reconnect crashes the yeet V8 worker
+ * (runtime defect), so egress-only is the churn-proof mode — at the cost of
+ * ingress (received messages).
+ *
+ *   const session = await snoop({ bin, pid, onEvent, onError, egressOnly });
  */
-export async function snoop({ bin, pid, onEvent, onError }) {
-  // All three attach as `kind: "uprobe"`; the daemon reads each program's ELF
+export async function snoop({ bin, pid, onEvent, onError, egressOnly = false }) {
+  const probe = new BpfObject({
+    exe: `${BIN_DIR}/${egressOnly ? "probe-egress.bpf.o" : "probe.bpf.o"}`,
+    base: import.meta.dirname,
+  });
+
+  // Each attaches as `kind: "uprobe"`; the daemon reads each program's ELF
   // section to tell entry (SEC("uprobe")) from return (SEC("uretprobe")).
   const uprobe = { kind: "uprobe", binary: bin, pid };
 
-  const control = await probe
+  let builder = probe
     .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
     .bind("focus", { kind: "array" }) // writable capture-filter (slot 0 ssl, 1 pid)
-    .attach("probe_ssl_write", { ...uprobe, symbol: "SSL_write" })
-    .attach("probe_ssl_read_enter", { ...uprobe, symbol: "SSL_read" })
-    .attach("probe_ssl_read_exit", { ...uprobe, symbol: "SSL_read" })
-    .start();
+    .attach("probe_ssl_write", { ...uprobe, symbol: "SSL_write" });
+  if (!egressOnly) {
+    builder = builder
+      .attach("probe_ssl_read_enter", { ...uprobe, symbol: "SSL_read" })
+      .attach("probe_ssl_read_exit", { ...uprobe, symbol: "SSL_read" });
+  }
+  const control = await builder.start();
 
   /* The user→kernel control path: write the BPF capture filter live so the
    * probe only emits the focused connection's (or process's) events. */

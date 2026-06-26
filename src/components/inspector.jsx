@@ -21,7 +21,7 @@ import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
 
 import Button from "./button.jsx";
 import { COL, roleColor, jsonColor } from "./palette.js";
-import { fmtBytes, fmtAgo, hexDump, jsonTokens } from "../lib/format.js";
+import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import {
@@ -45,9 +45,8 @@ import {
   isFocused,
 } from "../controls.js";
 
-/* Everything a free-text query tests a message against. */
-const searchable = (rec) =>
-  `${rec.name} ${rec.text ?? (rec.json !== undefined ? JSON.stringify(rec.json) : "")}${rec.inflateError ?? ""}`;
+/* Everything a free-text query tests a message against (text is the JSON). */
+const searchable = (rec) => `${rec.name} ${rec.text ?? ""}${rec.inflateError ?? ""}`;
 
 /* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */
 const copy = (text, note) => {
@@ -71,12 +70,12 @@ const arrow = (dir) => (dir === DIR_WRITE ? fg(COL.out)("↑") : fg(COL.in)("↓
 const badges = (rec) =>
   (rec.inflateError ? fg(COL.warn)("⚠") : rec.compressed ? fg(COL.in)("⚙") : " ");
 
-/* One message → its collapsed preview text (everything inflated already). */
+/* One message → its collapsed preview text. The text IS the JSON string, so the
+ * one-liner needs no parse — cheap enough to run per visible row per frame. */
 function preview(rec) {
   if (rec.inflateError) return fg(COL.warn)(`inflate failed: ${rec.inflateError}`);
   let s;
-  if (rec.json !== undefined) s = oneLine(JSON.stringify(rec.json));
-  else if (rec.text != null) s = oneLine(rec.text);
+  if (rec.text != null) s = oneLine(rec.text);
   else if (rec.control) s = `(${rec.name})`;
   else s = `${rec.len} bytes`;
   return fg(COL.dim)(s);
@@ -211,15 +210,17 @@ export default function Inspector({ groups, now, size }) {
   const Payload = (rec) => {
     const showRaw = raw.get();
     let kind, warn = null, lines;
+    const json = rec.text != null ? parseJson(rec.text) : undefined; // on demand
     if (rec.inflateError) {
       warn = `⚠ inflate failed: ${rec.inflateError} — raw deflate bytes`;
       lines = hexDump(rec.bytes).split("\n");
       kind = "hex";
     } else if (showRaw) {
-      lines = hexDump(rec.bytes).split("\n");
+      // raw bytes are retained only for binary; re-encode text on demand
+      lines = hexDump(rec.bytes ?? (rec.text != null ? utf8Bytes(rec.text) : null)).split("\n");
       kind = "hex";
-    } else if (rec.json !== undefined) {
-      lines = JSON.stringify(rec.json, null, 2).split("\n");
+    } else if (json !== undefined) {
+      lines = JSON.stringify(json, null, 2).split("\n");
       kind = "json";
     } else if (rec.text != null) {
       lines = rec.text.split("\n");

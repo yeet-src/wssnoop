@@ -61,24 +61,28 @@ const RAW_CAP = 2048;
 const HTTP_REQUEST = /^(GET|POST|PUT|HEAD|OPTIONS|DELETE|PATCH)\b/;
 
 /* A count-bounded ring of retained messages (the message-keyed analogue of the
- * byte-keyed TimeHist). `recent()` returns newest-first for the scrollback. */
+ * byte-keyed TimeHist). A true circular buffer: push is O(1) — no Array.shift
+ * (which is O(cap) and, under a burst, blocks the event loop). `recent()`
+ * materializes newest-first for the scrollback. */
 function createMsgRing(cap) {
-  const a = [];
-  let total = 0;
+  const a = new Array(cap);
+  let total = 0; // monotone push count; the live window is the last min(total,cap)
   return {
     push(rec) {
-      a.push(rec);
+      a[total % cap] = rec;
       total += 1;
-      if (a.length > cap) a.shift();
     },
     recent() {
-      return a.slice().reverse();
+      const n = Math.min(total, cap);
+      const out = new Array(n);
+      for (let i = 0; i < n; i++) out[i] = a[(total - 1 - i) % cap];
+      return out;
     },
     get total() {
       return total;
     },
     get size() {
-      return a.length;
+      return Math.min(total, cap);
     },
   };
 }
@@ -163,17 +167,17 @@ function retainMsg(c, dir, m, now) {
     closeCode: m.closeCode ?? null,
     closeReason: m.closeReason ?? null,
     text: m.text ?? null,
-    json: m.json,
-    /* raw payload bytes (capped) kept for every message so the inspector can
-     * show a hex view even when the message decoded cleanly. */
-    bytes: m.payload ? m.payload.slice(0, RAW_CAP) : null,
+    /* Raw bytes kept only when there's no text view (binary / inflate failure),
+     * where hex is the only fallback. For a text message the hex view is
+     * re-encoded from `text` on demand — don't retain derivable bytes. */
+    bytes: (m.text == null || m.inflateError) && m.payload ? m.payload.slice(0, RAW_CAP) : null,
   };
 }
 
 /* The aggregation core, factored out of the tap so it's drivable without BPF.
  * Holds the registry plus the per-process and global rollups and a running
  * event count; `ingest(rec, now)` folds one decoded record in. */
-export function createRegistry() {
+export function createRegistry({ onDrop } = {}) {
   const conns = new Map(); // key -> Conn
   const groups = new Map(); // pid -> { pid, conns:Map, hist, msgUp, msgDn }
   const globalHist = createTimeHist();
@@ -199,6 +203,7 @@ export function createRegistry() {
     if (!c) return;
     conns.delete(key);
     memberVersion += 1;
+    onDrop?.(key); /* let the decoder forget this conn's streams + inflater */
     const g = groups.get(c.pid);
     if (g) {
       g.conns.delete(key);
@@ -363,7 +368,7 @@ export function createRegistry() {
   return { ingest, evict, snapshot, focusGone };
 }
 
-export function createSession({ bin, pid, debug = false } = {}) {
+export function createSession({ bin, pid, debug = false, egressOnly = false } = {}) {
   const groups = signal([]);
   const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
@@ -378,7 +383,7 @@ export function createSession({ bin, pid, debug = false } = {}) {
    * state lands in the registry, published on the heartbeat. */
   const tap = from(() => {
     const decoder = createDecoder({ debug });
-    const reg = createRegistry();
+    const reg = createRegistry({ onDrop: (key) => decoder.drop(key) });
 
     /* The probe's live capture-filter setter, once the attach resolves. The UI
      * sets controls.focusKey (`${pid}:${ssl}` | null); we mirror it into the
@@ -403,24 +408,31 @@ export function createSession({ bin, pid, debug = false } = {}) {
      * the header surface it. We keep a small status string for the header. */
     let lastMember = -1;
     const publish = () => {
-      const now = Date.now();
-      reg.evict(now);
-      /* If the focused connection has closed/recycled/evicted, the kernel
-       * filter would silence *everything* — release focus so the table doesn't
-       * look frozen. */
-      if (focusKey.get() && reg.focusGone(focusKey.get())) clearFocus();
-      syncFocus();
-      const snap = reg.snapshot();
-      /* Republish the group structure only when membership changed; the clock
-       * tick drives per-row content (sparklines, counts) off the live conn
-       * objects, so steady traffic doesn't rebuild the tree (gotcha 10). */
-      if (snap.memberVersion !== lastMember) {
-        groups.set(snap.groups);
-        lastMember = snap.memberVersion;
+      /* The heartbeat is a timer callback — an uncaught throw here escapes into
+       * the runtime and can take down the whole V8 worker (closing the TTY with
+       * no message). Catch it, surface it on the status line, and keep ticking. */
+      try {
+        const now = Date.now();
+        reg.evict(now);
+        /* If the focused connection has closed/recycled/evicted, the kernel
+         * filter would silence *everything* — release focus so the table
+         * doesn't look frozen. */
+        if (focusKey.get() && reg.focusGone(focusKey.get())) clearFocus();
+        syncFocus();
+        const snap = reg.snapshot();
+        /* Republish the group structure only when membership changed; the clock
+         * tick drives per-row content (sparklines, counts) off the live conn
+         * objects, so steady traffic doesn't rebuild the tree (gotcha 10). */
+        if (snap.memberVersion !== lastMember) {
+          groups.set(snap.groups);
+          lastMember = snap.memberVersion;
+        }
+        global.set(snap.global);
+        stats.set(snap.stats);
+        clock.set(now);
+      } catch (e) {
+        status.set(`heartbeat fault: ${e && e.message ? e.message : e}`);
       }
-      global.set(snap.global);
-      stats.set(snap.stats);
-      clock.set(now);
     };
 
     /* Keep decode faults local to the offending event (gotcha 12). */
@@ -439,11 +451,12 @@ export function createSession({ bin, pid, debug = false } = {}) {
     const session = snoop({
       bin,
       pid,
+      egressOnly,
       onEvent,
       onError: (e) => status.set(`tap fault: ${e && e.message ? e.message : e}`),
     })
       .then((s) => {
-        status.set("tracing");
+        status.set(egressOnly ? "tracing (egress-only)" : "tracing");
         focusFn = s.setFocus; /* enable the capture-focus control */
         syncFocus();
         return s;

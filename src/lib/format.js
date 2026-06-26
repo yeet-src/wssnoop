@@ -34,6 +34,34 @@ export function fmtAgo(ms) {
   return `${Math.floor(s / 3600)}h`;
 }
 
+/* Parse a string as JSON, or undefined if it isn't — for on-demand decode of a
+ * retained message's text (we no longer store the parsed object). */
+export function parseJson(text) {
+  if (text == null) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/* Encode a string to UTF-8 bytes (no TextEncoder in this isolate). Used to show
+ * a hex view of a text message on demand, since we don't retain its raw bytes. */
+export function utf8Bytes(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      const c2 = str.charCodeAt(++i);
+      c = 0x10000 + ((c & 0x3ff) << 10) + (c2 & 0x3ff);
+      out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    } else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+  }
+  return new Uint8Array(out);
+}
+
 /* Tokenize one line of (pretty-printed) JSON into typed spans the UI colors:
  * `key` (a "..." immediately before a colon), `str`, `num`, `lit`
  * (true/false/null), `punct`, and `ws`. Pure — returns {text, kind}[]; the

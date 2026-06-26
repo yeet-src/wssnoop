@@ -66,7 +66,7 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   const msgs = out.filter((e) => e.type === "message");
   eq(msgs.length, 1, "one message from one frame");
   eq(msgs[0].msg.text, text, "TEXT payload decoded");
-  eq(msgs[0].msg.json, { hello: "world", n: 42 }, "JSON parsed");
+  eq(JSON.parse(msgs[0].msg.text), { hello: "world", n: 42 }, "TEXT round-trips as JSON");
   eq(msgs[0].msg.opcode, 0x1, "opcode TEXT");
   eq(msgs[0].msg.frames, 1, "single frame count");
 }
@@ -149,11 +149,16 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(base64(bytes("M")), "TQ==", "base64 1-byte pad");
   eq(base64(new Uint8Array(0)), "", "base64 empty");
 
-  const recOut = { seq: 5, at: 0, dir: DIR_WRITE, name: "TEXT", len: 3, wireLen: 3, compressed: false, text: "hey", json: undefined, bytes: bytes("hey") };
+  const recOut = { seq: 5, at: 0, dir: DIR_WRITE, name: "TEXT", len: 3, wireLen: 3, compressed: false, text: "hey", bytes: null };
   const r = messageRecord(recOut);
   eq(r.dir, "out", "export dir out for DIR_WRITE");
-  eq(r.text, "hey", "export keeps text");
+  eq(r.text, "hey", "export keeps non-JSON text");
   ok(!("base64" in r), "export omits base64 when text present");
+
+  // text that parses as JSON exports as structured json
+  const recJson = messageRecord({ seq: 7, dir: DIR_READ, name: "TEXT", len: 9, text: '{"a":1,"b":[2]}' });
+  eq(recJson.json, { a: 1, b: [2] }, "export parses JSON text to json on demand");
+  ok(!("text" in recJson), "export omits raw text when it's JSON");
 
   const recBin = { seq: 6, dir: DIR_READ, name: "BIN", len: 2, text: null, json: undefined, bytes: new Uint8Array([1, 2]) };
   eq(messageRecord(recBin).base64, base64(new Uint8Array([1, 2])), "export base64 for binary");

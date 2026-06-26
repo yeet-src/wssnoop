@@ -29,11 +29,15 @@
  * so we ship it as an opaque connection id and let JS demux streams by
  * (pid, ssl, direction). No WebSocket/HTTP parsing happens here. */
 
-#define CHUNK    16384    /* payload bytes captured per SSL call (power of 2);
-                           * one TLS record maxes at ~16 KB, so a single
-                           * SSL_read/SSL_write rarely exceeds this. */
-#define CAP_MASK 0x3fff   /* `cap &= CAP_MASK` bounds the copy for the verifier;
-                           * caps capture at 16383 bytes (one short of CHUNK). */
+#define CHUNK    4096     /* payload bytes captured per SSL call (power of 2).
+                           * The whole struct (incl. this array) is decoded into
+                           * a JS object PER ring event, so its size is the
+                           * dominant per-event allocation — keep it tight. WS
+                           * control/JSON messages are almost always < 1 KB; a
+                           * larger SSL call is reported truncated (state marks
+                           * the conn) rather than captured whole. */
+#define CAP_MASK 0x0fff   /* `cap &= CAP_MASK` bounds the copy for the verifier;
+                           * caps capture at 4095 bytes (one short of CHUNK). */
 
 #define DIR_READ  0       /* ingress: bytes coming up out of SSL_read  */
 #define DIR_WRITE 1       /* egress:  bytes going down into SSL_write  */
@@ -61,7 +65,13 @@ struct {
 
 /* SSL_read fills its buffer asynchronously, so carry the (ssl, buf) pair
  * from the entry uprobe to the return uretprobe, keyed by the calling
- * thread. A hash (not a single slot) tolerates nested/recursive TLS use. */
+ * thread. A hash (not a single slot) tolerates nested/recursive TLS use.
+ *
+ * NOTE: the SSL_read uretprobe (probe_ssl_read_exit) is what lets us capture
+ * ingress, but a uretprobe firing across a connection teardown/reconnect
+ * crashes the yeet V8 worker (a runtime defect — see EGRESS_ONLY below). Build
+ * with -DEGRESS_ONLY for a churn-proof, egress-only object. */
+#ifndef EGRESS_ONLY
 struct read_args {
     __u64 ssl;
     __u64 buf;
@@ -73,6 +83,7 @@ struct {
     __type(value, struct read_args);
     __uint(max_entries, 10240);
 } active_reads SEC(".maps");
+#endif
 
 /* User-writable capture filter — the user->kernel control path. JS writes two
  * slots live (yeet:bpf ArrayMap.update): slot 0 a focus SSL*, slot 1 a focus
@@ -141,6 +152,7 @@ int BPF_KPROBE(probe_ssl_write, void *ssl, const void *buf, int num)
     return 0;
 }
 
+#ifndef EGRESS_ONLY
 /* int SSL_read(SSL *ssl, void *buf, int num) — buffer filled by return. */
 SEC("uprobe")
 int BPF_KPROBE(probe_ssl_read_enter, void *ssl, void *buf, int num)
@@ -167,5 +179,6 @@ int BPF_KRETPROBE(probe_ssl_read_exit, int ret)
         emit(ssl, buf, (__u32) ret, DIR_READ);
     return 0;
 }
+#endif
 
 char LICENSE[] SEC("license") = "GPL";

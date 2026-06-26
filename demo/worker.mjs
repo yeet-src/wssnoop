@@ -27,6 +27,11 @@ const FEEDS = arg("feeds", "coinbase,kraken,poly").split(",").map((s) => s.trim(
 // processes first (so a `--bin <node>` attach, which only hooks processes that
 // already exist, picks them up) and then attach wssnoop before any handshake.
 const DELAY = Number(arg("delay", "0")) || 0;
+// Base ms before a connection is gracefully recycled (jittered ×1–2). 0 = never
+// recycle — used to isolate whether connection churn is what crashes wssnoop.
+const RECYCLE = arg("recycle", "60000") === "0" ? 0 : Number(arg("recycle", "60000")) || 60000;
+const NO_DEFLATE = process.argv.includes("--no-deflate"); // disable permessage-deflate
+const ABRUPT = process.argv.includes("--abrupt"); // recycle by terminate() (no CLOSE/shutdown)
 process.title = ROLE;
 
 const log = (...a) => console.log(`[${ROLE}]`, ...a);
@@ -92,7 +97,7 @@ class Feed {
   }
 
   connect() {
-    const ws = new WebSocket(this.a.url);
+    const ws = new WebSocket(this.a.url, { perMessageDeflate: !NO_DEFLATE });
     this.ws = ws;
     ws.on("open", () => {
       log(`open ${this.a.name}`);
@@ -106,7 +111,11 @@ class Feed {
       // wssnoop sees role/dest even when attached mid-stream, and the
       // connection lifecycle (open → closing → closed → reopen) is on display.
       clearTimeout(this.recycle);
-      this.recycle = setTimeout(() => this.ws?.close(1000, "recycle"), 60000 + Math.random() * 60000);
+      if (RECYCLE)
+        this.recycle = setTimeout(
+          () => (ABRUPT ? this.ws?.terminate() : this.ws?.close(1000, "recycle")),
+          RECYCLE + Math.random() * RECYCLE,
+        );
     });
     ws.on("message", () => {}); // received frames are what wssnoop observes
     ws.on("close", () => {

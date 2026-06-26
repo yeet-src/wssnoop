@@ -24,6 +24,7 @@
 import { mount } from "yeet:tui";
 
 import Root from "./components/root.jsx";
+import Bsod from "./components/bsod.jsx";
 import { createSession } from "./state.js";
 import {
   isInspecting,
@@ -43,6 +44,9 @@ const BIN = String(args.bin ?? args.b ?? "libssl.so");
 const PID = args.pid != null ? Number(args.pid) : undefined;
 const SECS = Number(args.secs ?? args.s ?? 0); /* 0 = run until quit */
 const DEBUG = parseBool(args.debug ?? args.d);
+/* egress-only: capture SSL_write only (no SSL_read uretprobe). The churn-proof
+ * mode — a uretprobe across a connection reconnect crashes the V8 worker. */
+const EGRESS_ONLY = parseBool(args["egress-only"] ?? args.egress ?? args.e);
 
 function parseBool(v) {
   if (v == null) return false;
@@ -83,8 +87,13 @@ tty.on("keydown", (e) => {
 
 /* The session is a bundle of signals; the BPF tap attaches when the view mounts
  * (the signals get watched) and detaches when it unmounts. */
-const session = createSession({ bin: BIN, pid: PID, debug: DEBUG });
-const teardown = mount((size) => <Root size={size} {...session} />);
+const session = createSession({ bin: BIN, pid: PID, debug: DEBUG, egressOnly: EGRESS_ONLY });
+let teardown;
+try {
+  teardown = mount((size) => <Root size={size} {...session} />);
+} catch (e) {
+  teardown = mount(() => <Bsod error={e} />); // setup threw → show it, don't dump a stack
+}
 
 /* `--secs N` runs for N seconds, then unmounts (tearing the tap down) and exits;
  * otherwise the mounted UI keeps the isolate alive until q / Ctrl-C. */

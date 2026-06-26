@@ -18,14 +18,16 @@
  *   { type: "debug",         pid, tid, ssl, dir, ts, stage, bufLen, head }
  *
  * A Message is the decoded WebSocket message — the thing worth poking at:
- *   { name, opcode, len, payload:Uint8Array,
+ *   { name, opcode, len, wireLen, frames, masked, fin, payload:Uint8Array,
  *     control?:true,                 // CLOSE/PING/PONG
+ *     closeCode?, closeReason?,      // for CLOSE
  *     compressed?:true,              // arrived permessage-deflate compressed
  *     inflateError?:string,          // set (payload left raw) if inflate failed
- *     text?:string, json?:any }      // set for TEXT frames (after inflation)
+ *     text?:string }                 // set for TEXT frames (after inflation)
  *
- * `compressed` records that the frame carried the RSV1 deflate bit; the
- * `payload`/`len`/`text`/`json` are of the *inflated* message — unless
+ * `len` is the inflated size, `wireLen` the on-wire (compressed) size; JSON is
+ * parsed on demand by consumers, not here. `compressed` records the RSV1
+ * deflate bit; `payload`/`len`/`text` are of the *inflated* message — unless
  * `inflateError` is set, in which case the raw deflate bytes are left in
  * `payload` (e.g. a mid-stream attach desynced the LZ77 window).
  */
@@ -250,7 +252,7 @@ function onFrame(s, f) {
     const msg = {
       name, opcode: f.opcode, control: true,
       len: f.len, wireLen: f.len, frames: 1, fin: f.fin, masked: f.masked, rsv1: f.rsv1,
-      payload: f.payload, text: null, json: undefined,
+      payload: f.payload, text: null,
     };
     if (f.opcode === 0x8 && f.payload.length >= 2) {
       msg.closeCode = (f.payload[0] << 8) | f.payload[1];
@@ -295,7 +297,6 @@ function finishMessage(s, opcode, rsv1, chunks, masked) {
     rsv1,
     payload,
     text: null,
-    json: undefined,
   };
 
   /* permessage-deflate: the RSV1 bit on the message's first frame marks it
@@ -312,14 +313,10 @@ function finishMessage(s, opcode, rsv1, chunks, masked) {
     }
   }
 
-  if (opcode === 0x1) {
-    msg.text = utf8(payload);
-    try {
-      msg.json = JSON.parse(msg.text);
-    } catch {
-      /* not JSON; text still set */
-    }
-  }
+  /* TEXT frames decode to a string; JSON is parsed on demand by consumers
+   * (inspector expand / export), not here — so we don't pay the parse for
+   * every message nor retain the object graph. */
+  if (opcode === 0x1) msg.text = utf8(payload);
   return msg;
 }
 
@@ -427,5 +424,14 @@ export function createDecoder({ debug = false } = {}) {
     return out;
   }
 
-  return { push };
+  /* Forget a connection's per-direction streams — called when the registry
+   * evicts the conn, so the decoder Map (and each stream's buffer + native
+   * inflater) doesn't grow without bound as connections churn. `key` is
+   * `${pid}:${ssl}`; both directions are dropped. */
+  function drop(key) {
+    conns.delete(`${key}:0`);
+    conns.delete(`${key}:1`);
+  }
+
+  return { push, drop };
 }

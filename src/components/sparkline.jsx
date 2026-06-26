@@ -3,18 +3,25 @@
  * (fg) is egress (UP / SSL_write), the lower half (bg) is ingress (DOWN /
  * SSL_read). Both halves heat-shade by that column's share of the window peak.
  *
- * It reads `now` and `span` in its OWN thunk, so it reflows on every clock tick
- * without the caller re-rendering — the sparkline is the only thing that needs
- * to repaint when wall time advances. `variant` picks the hue pair (see
- * lib/format.js) so a process or global aggregate reads as distinct from a
- * per-connection row. */
+ * Rendered into a CellBuffer, not <Text>: there are ~13 sparklines, each ~120
+ * cells, each repainting every heartbeat. A <Text> path would mint a styled Run
+ * per cell every tick — thousands of short-lived objects/sec that outran GC and
+ * OOM'd the (memory-limited) V8 isolate within a minute. The CellBuffer writes
+ * color ints straight into reused plane views (`heatFor`'s ramps return ints,
+ * and "▀" is a single code point), so a redraw allocates essentially nothing.
+ *
+ * Redraw is driven by a timer, not by reading `now` in a thunk: the draw calls
+ * cb.touch() (a Signal set), which can't happen during graph evaluation — so it
+ * must run from a timer callback, outside the render. An Effect owns the timer's
+ * lifecycle (start on mount, clear on unmount). `variant` picks the hue pair
+ * (see lib/format.js) so a process/global aggregate reads distinct from a row. */
 
-import { Box, Text, fg, bg } from "yeet:tui";
+import { Box, CellBuffer, Effect } from "yeet:tui";
 
 import { heatFor } from "../lib/format.js";
 import { tip } from "../controls.js";
 
-const GLYPH = "▀"; // upper half block: fg paints the top (egress), bg the bottom (ingress)
+const GLYPH = 0x2580; // "▀" upper half block (a single code point → stored as-is)
 
 /* Default tooltips — the chart's meaning isn't self-evident, so each variant
  * explains itself in the minibuffer on hover. */
@@ -24,29 +31,40 @@ const TITLES = {
   global: "all processes — total bytes/sec; upper = sent, lower = received; brighter = more",
 };
 
-/* Magnitude → brightness within a fixed per-variant hue (see lib/format.js):
- * the upper half (fg) is egress, the lower half (bg) ingress, both shaded by
- * that column's share of the window peak. Idle cells (and any unfilled width)
- * sit on the explicit dark TRACK so the rail reads as one flat strip. */
 export default function Sparkline({ hist, now, span, width, variant = "conn", title }) {
+  const w = Math.max(1, width | 0);
   const pal = heatFor(variant);
+  const cb = CellBuffer({ rows: 1, cols: w });
+  /* Writable views into the buffer's planes — captured once; the buffer never
+   * reallocates, so these stay valid across redraws. fg/bg take color ints. */
+  const chars = cb.chars.window([0]).flat();
+  const fg = cb.fg.window([0]).flat();
+  const bg = cb.bg.window([0]).flat();
+
+  const draw = () => {
+    if (!hist) return;
+    const { up, down, peak } = hist.window(now.get(), span.get(), w);
+    const p = Math.max(1, peak);
+    for (let c = 0; c < w; c++) {
+      chars[c] = GLYPH;
+      fg[c] = pal.up((up[c] || 0) / p); // egress → top half
+      bg[c] = pal.down((down[c] || 0) / p); // ingress → bottom half
+    }
+    cb.touch();
+  };
+
   return (
-    <Box width={width} height={1} overflow="hidden" bg={pal.track} {...tip(title ?? TITLES[variant])}>
-      <Text break="none">
+    <Box width={w} height={1} overflow="hidden" {...tip(title ?? TITLES[variant])}>
+      {cb}
+      <Effect>
         {() => {
-          if (!hist) return "";
-          const cols = Math.max(1, width | 0);
-          const { up, down, peak } = hist.window(now.get(), span.get(), cols);
-          const p = Math.max(1, peak);
-          const cells = [];
-          for (let c = 0; c < cols; c++) {
-            const u = (up[c] ?? 0) / p;
-            const d = (down[c] ?? 0) / p;
-            cells.push(fg(pal.up(u))(bg(pal.down(d))(GLYPH)));
-          }
-          return cells;
+          /* draw() sets a Signal (cb.touch) — defer it out of this effect's
+           * graph evaluation, then repaint on a timer matching the heartbeat. */
+          queueMicrotask(draw);
+          const t = setInterval(draw, 500);
+          return () => clearInterval(t);
         }}
-      </Text>
+      </Effect>
     </Box>
   );
 }

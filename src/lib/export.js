@@ -7,6 +7,7 @@
  * via tty) lives at the component edge. */
 
 import { DIR_WRITE } from "./decode.js";
+import { parseJson } from "./format.js";
 
 /* btoa isn't in bare V8; hand-roll base64 for the raw-bytes fallback. */
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -35,9 +36,13 @@ export function messageRecord(rec) {
   };
   if (rec.compressed) r.compressed = true;
   if (rec.inflateError) r.inflateError = rec.inflateError;
-  if (rec.json !== undefined) r.json = rec.json;
-  else if (rec.text != null) r.text = rec.text;
-  else if (rec.bytes) r.base64 = base64(rec.bytes);
+  if (rec.text != null) {
+    const j = parseJson(rec.text);
+    if (j !== undefined) r.json = j; // structured when it parses…
+    else r.text = rec.text; // …raw text otherwise
+  } else if (rec.bytes) {
+    r.base64 = base64(rec.bytes);
+  }
   return r;
 }
 
