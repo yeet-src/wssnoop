@@ -96,11 +96,40 @@ const Tag = (title, ...content) => (
   </Box>
 );
 
+/* A scroll affordance: a 3-row opacity gradient fading the log into the panel
+ * background at one edge, shown only when there's more content past that edge.
+ * It's three height-1 boxes of increasing alpha (sheer → near-opaque toward the
+ * very edge) z-stacked over the message text — an rgba bg dims the content
+ * beneath it, the same trick the scrim uses to dim the table. The 8-digit hex
+ * is #RRGGBBAA over COL.panel (#11161f). */
+const FADE = ["#11161f59", "#11161fa6", "#11161fe6"]; // sheer → near-opaque
+const EdgeFade = ({ edge }) => {
+  const rows = edge === "top" ? [...FADE].reverse() : FADE; // opaque at the edge
+  return (
+    <Box
+      left={0}
+      right={0}
+      {...(edge === "top" ? { top: 0 } : { bottom: 0 })}
+      height={3}
+      z={1}
+      direction="column"
+    >
+      {rows.map((c) => (
+        <Box height={1} bg={c} />
+      ))}
+    </Box>
+  );
+};
+
 export default function Inspector({ groups, now, size }) {
   let count = 0; /* messages last rendered — clamps the wheel */
-  /* Visible message rows = the log viewport height, shared by the list and the
-   * scrollbar so the thumb math matches what's shown (≈ panel minus chrome). */
-  const viewH = () => Math.max(4, size.get().rows - 15);
+  /* Visible message rows = the log viewport height (the page size for scroll and
+   * fade math). The flush full-height panel's chrome above the log is title(1) +
+   * summary(2) + actions(1) + rule(1), the footer(1) below, and the toolbar(~3)
+   * the panel sits under ≈ rows-10. The list overfills past this and relies on
+   * overflow:hidden, so a small misestimate clips cleanly instead of gapping. */
+  const viewH = () => Math.max(4, size.get().rows - 10);
+  const OVERFILL = 3; /* extra rows rendered so text always reaches the bottom edge */
 
   /* Follow vs. paused (state in controls.js, see note there). A busy socket
    * prepends faster than you can read, so the moment you scroll or expand we
@@ -138,7 +167,10 @@ export default function Inspector({ groups, now, size }) {
   const onWheel = (e) => {
     pause(); /* examining history — stop the tail from yanking it away */
     const d = e.deltaY > 0 ? 3 : -3;
-    scroll.set(Math.max(0, Math.min(count - 1, scroll.get() + d)));
+    /* the last page aligns the oldest message to the bottom, so you can't
+     * scroll past the content (and can't scroll at all when it all fits). */
+    const maxScroll = Math.max(0, currentMsgs().length - viewH());
+    scroll.set(Math.max(0, Math.min(maxScroll, scroll.get() + d)));
   };
 
   const toggle = (seq) => {
@@ -234,15 +266,17 @@ export default function Inspector({ groups, now, size }) {
           fg(COL.dim)(` · ${rec.frames} frames`),
         ),
       );
+    /* Masking is only worth surfacing when it's WRONG — correct masking is the
+     * silent default, a ✗ is the signal. RFC-6455: client→server frames must be
+     * masked, server→client must not be. */
     const maskOk = rec.dir === DIR_WRITE ? rec.masked : !rec.masked;
-    out.push(
-      Tag(
-        maskOk
-          ? "mask ✓ · RFC-6455 masking is correct (client→server frames must be masked, server→client must not be)"
-          : "mask ✗ · RFC-6455 masking is wrong for this direction; client→server frames must be masked and server→client must not be, so a violation here means a broken/misbehaving peer",
-        maskOk ? fg(COL.dim)(" · mask ✓") : fg(COL.warn)(" · mask ✗"),
-      ),
-    );
+    if (!maskOk)
+      out.push(
+        Tag(
+          "mask ✗ · RFC-6455 masking is wrong for this direction; client→server frames must be masked and server→client must not be, so a violation here means a broken/misbehaving peer",
+          fg(COL.warn)(" · mask ✗"),
+        ),
+      );
     if (rec.closeCode != null)
       out.push(
         Tag(
@@ -516,10 +550,11 @@ export default function Inspector({ groups, now, size }) {
 
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
-        {/* the message log with an OVERLAY scrollbar: the log fills the full
-            width and the scrollbar floats over its right edge (a z-stacked Layer
-            child) rather than reserving a column, so nothing reflows when it
-            appears/disappears. */}
+        {/* the message log with edge-fade scroll affordances: the log fills the
+            full width; a 3-row opacity gradient fades it into the panel at the
+            top edge when there's newer content above (you've scrolled off the
+            live tail) and at the bottom edge when there's older content below.
+            They're z-stacked Layer children, so nothing reflows. */}
         <Box height="1fr" overflow="hidden" onWheel={onWheel}>
           <Layer height="1fr">
             <Box width="1fr" height="1fr" overflow="hidden">
@@ -534,37 +569,31 @@ export default function Inspector({ groups, now, size }) {
                   const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
                   return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
                 }
-                const top = Math.max(0, Math.min(scroll.get(), count - 1));
+                const top = Math.min(Math.max(0, scroll.get()), Math.max(0, count - viewH()));
                 const open = expanded.get();
                 /* Flat list: preview rows are direct children; an expanded payload
                    follows its row as a sibling (not nested) so each clickable row
-                   keeps a definite-height parent. */
-                return all.slice(top, top + viewH()).flatMap((rec) =>
+                   keeps a definite-height parent. Render a few extra rows past the
+                   logical page so the list always reaches the Layer's bottom edge
+                   (overflow:hidden clips them) and the bottom fade sits on text. */
+                return all.slice(top, top + viewH() + OVERFILL).flatMap((rec) =>
                   rec.seq === open ? [previewRow(rec), Payload(rec)] : [previewRow(rec)],
                 );
               }}
             </Box>
             {() => {
-              /* A proportional scrollbar floating on the right edge: thumb size =
-                 window/total, position = scroll/maxScroll. Absent when it all
-                 fits. Its glyphs draw over the log's last column (overlay style). */
+              /* Edge fades mark hidden content: top when scrolled off the newest
+                 (more above), bottom when there's older scrollback (more below).
+                 Absent when it all fits, so they double as a "scrollable" hint. */
               if (!lookup()) return null;
               now.get();
               const n = currentMsgs().length;
               const h = viewH();
-              if (n <= h) return null;
-              const thumb = Math.max(1, Math.round((h / n) * h));
-              const top = Math.max(0, Math.min(scroll.get(), n - 1));
-              const pos = Math.min(h - thumb, Math.round((top / Math.max(1, n - h)) * (h - thumb)));
-              return (
-                <Box right={0} top={0} width={1} z={1} direction="column" break="none">
-                  {Array.from({ length: h }, (_, i) => (
-                    <Text height={1} break="none">
-                      {i >= pos && i < pos + thumb ? fg(COL.accent)("█") : fg(COL.header)("░")}
-                    </Text>
-                  ))}
-                </Box>
-              );
+              const top = Math.min(Math.max(0, scroll.get()), Math.max(0, n - h));
+              return [
+                top > 0 ? <EdgeFade edge="top" /> : null,
+                top + h < n ? <EdgeFade edge="bottom" /> : null,
+              ];
             }}
           </Layer>
         </Box>
