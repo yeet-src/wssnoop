@@ -73,9 +73,20 @@ done
 NODE="$(command -v node 2>/dev/null || true)"
 YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
 
+# Reap stale wssnoop isolates. `yeet run` outlives its client: closing the
+# terminal (or killing it) leaves the daemon-side isolate running its BPF tap,
+# and those zombies starve a fresh attach until it hangs at "starting…". `yeet
+# ps`/`yeet kill` clears any left from a prior run, so each attach starts clean.
+reap_jails() {
+  "$YEET" ps 2>/dev/null \
+    | awk 'NR>1 && $1 ~ /^[0-9]+$/ && /main\.jsx/ { print $1 }' \
+    | while read -r id; do "$YEET" kill "$id" >/dev/null 2>&1 || true; done
+}
+
 stop() {
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   pkill -f "worker.mjs" 2>/dev/null || true
+  reap_jails
 }
 
 status() {
