@@ -8,9 +8,9 @@ uprobes has something genuine to capture.
 ## Run it (headless — the primary demo)
 
 ```sh
-./demo/run.sh --attach     # start the traffic AND launch wssnoop attached to it
+./demo/run.sh attach     # start the traffic AND launch wssnoop attached to it
 ./demo/run.sh              # just the traffic; prints the wssnoop attach command
-./demo/run.sh --stop       # stop the workers
+./demo/run.sh stop       # stop the workers
 ```
 
 Run inside the yeet VM. `run.sh` starts **three worker processes**

@@ -6,17 +6,6 @@
 # churning subscriptions, so wssnoop has rich multi-process, multi-connection,
 # bidirectional traffic to show immediately.
 #
-#   ./demo/run.sh             start the traffic, print the wssnoop attach command
-#   ./demo/run.sh --attach    start the traffic AND launch wssnoop attached to it
-#   ./demo/run.sh --stop      stop all demo workers
-#
-# Traffic-shaping knobs (pass as FLAGS, not env vars — the VM's login shell is
-# fish, which silently ignores `VAR=val ./run.sh`, so flags are the safe path):
-#   --recycle MS   recycle each connection every ~MS (jittered ×1–2); 0 = never
-#   --no-deflate   disable permessage-deflate on the workers
-#   --abrupt       recycle by terminate() (no CLOSE/shutdown) — exercises resets
-# (Env vars RECYCLE / NODEFLATE / ABRUPT still work as fallback defaults.)
-#
 # Run it inside the yeet VM (where node + yeet live). Attaches by --bin <node>
 # with no --pid, so wssnoop sees every worker — current and future.
 #
@@ -33,33 +22,90 @@ cd "$DEMO_DIR"
 
 ROLES=(order-router md-gateway risk-engine)
 
-# Knobs default from the environment (back-compat) and are overridden by flags.
-ATTACH=""
-STOP=""
+usage() {
+  cat <<'EOF'
+wssnoop demo — drive live wss:// traffic for wssnoop to inspect.
+
+USAGE
+  ./demo/run.sh <command> [options]
+
+COMMANDS
+  start            start the worker processes; print the wssnoop attach command
+  attach           start the workers AND launch wssnoop attached to them
+  stop             stop all demo workers
+  status           show which workers are running
+  help             show this help (also shown with no command)
+
+OPTIONS (apply to start / attach; flags, so fish-safe)
+  --recycle MS     recycle each connection every ~MS (jittered ×1–2); 0 = never
+  --no-deflate     disable permessage-deflate on the workers
+  --abrupt         recycle by terminate() (no CLOSE/shutdown) — exercises resets
+  (Env vars RECYCLE / NODEFLATE / ABRUPT still work as fallback defaults.)
+
+EXAMPLES
+  ./demo/run.sh attach                  # the one-liner demo
+  ./demo/run.sh start --recycle 6000    # background traffic with reconnect churn
+  ./demo/run.sh status
+  ./demo/run.sh stop
+EOF
+}
+
+# A bare-verb subcommand plus --options. Options default from the environment
+# (back-compat). The command is the first verb seen; no command ⇒ help.
+CMD=""
 RECYCLE="${RECYCLE:-0}"
 NODEFLATE="${NODEFLATE:-}"
 ABRUPT="${ABRUPT:-}"
+set_cmd() { [[ -z "$CMD" ]] || { echo "conflicting commands: $CMD and $1" >&2; exit 2; }; CMD="$1"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --attach)     ATTACH=1 ;;
-    --stop)       STOP=1 ;;
+    start|attach|stop|status) set_cmd "$1" ;;
+    help|--help|-h) CMD="help"; break ;;
     --recycle)    RECYCLE="$2"; shift ;;
     --recycle=*)  RECYCLE="${1#*=}" ;;
     --no-deflate) NODEFLATE=1 ;;
     --abrupt)     ABRUPT=1 ;;
-    *) echo "unknown flag: $1" >&2; exit 2 ;;
+    *) echo "unknown argument: $1" >&2; echo "try: ./demo/run.sh help" >&2; exit 2 ;;
   esac
   shift
 done
+
+NODE="$(command -v node 2>/dev/null || true)"
+YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
 
 stop() {
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   pkill -f "worker.mjs" 2>/dev/null || true
 }
 
-if [[ "$STOP" == 1 ]]; then stop; echo "stopped demo workers"; exit 0; fi
+status() {
+  local any=0
+  for r in "${ROLES[@]}"; do
+    # `|| true`: pgrep exits 1 when nothing matches, which under `set -e` +
+    # pipefail would otherwise abort the whole script on a down worker.
+    local pids; pids="$(pgrep -x "$r" 2>/dev/null | tr '\n' ' ')" || true
+    if [[ -n "$pids" ]]; then
+      printf "  %-14s up    pid %s\n" "$r" "${pids% }"; any=1
+    else
+      printf "  %-14s down\n" "$r"
+    fi
+  done
+  if [[ "$any" == 1 ]]; then
+    echo ">> attach wssnoop (sees all workers — no --pid needed):"
+    echo ">>     $YEET run src/main.jsx -- --bin ${NODE:-node}"
+  else
+    echo ">> no workers running — start them with ./demo/run.sh start"
+  fi
+}
 
-command -v node >/dev/null || { echo "node not found — is nvm sourced?"; exit 1; }
+case "$CMD" in
+  ""|help) usage; exit 0 ;;
+  status)  status; exit 0 ;;
+  stop)    stop; echo "stopped demo workers"; exit 0 ;;
+esac
+
+# --- start / attach from here ------------------------------------------------
+[[ -n "$NODE" ]] || { echo "node not found — is nvm sourced?"; exit 1; }
 npm install --no-audit --no-fund >/dev/null 2>&1 || true
 
 # delay_ms: how long each worker waits before opening its connections. setsid
@@ -75,13 +121,10 @@ start_workers() {
   done
 }
 
-NODE="$(command -v node)"
-YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
-
-stop
+stop          # clear any prior run first
 sleep 1
 
-if [[ "$ATTACH" == 1 ]]; then
+if [[ "$CMD" == "attach" ]]; then
   # A `--bin <node>` attach only hooks processes that exist when it attaches, so
   # the workers must be running first — but we still want wssnoop to catch their
   # handshakes. So start the worker processes now with a connect-delay, then
@@ -94,6 +137,7 @@ if [[ "$ATTACH" == 1 ]]; then
   exec "$YEET" run src/main.jsx -- --bin "$NODE"
 fi
 
+# --start
 start_workers 0
 sleep 1
 echo ">> ${#ROLES[@]} workers up: ${ROLES[*]}"

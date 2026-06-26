@@ -188,7 +188,7 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## Open issue: hard death still recurs under heavy reconnect churn
 The memory work fixed the *calm* case, but the death is **not fully gone**. With
-`./demo/run.sh --recycle 6000` (every connection of all 3 workers recycling
+`./demo/run.sh start --recycle 6000` (every connection of all 3 workers recycling
 ~every 6 s, full market-data firehose, captured via `--bin node` with no `--pid`),
 the worker still dies hard (#4) ~6–8 s in — right as churn begins. It renders
 fine until then. The baseline (pre-UI-work) reproduces this identically, so it's

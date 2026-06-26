@@ -61,7 +61,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
              * handshake yet. Show the probe status so a failed attach is plain. */
             return (
               <Text break="anywhere" fg={COL.dim}>
-                {() => `  ${status.get()} — waiting for the first WebSocket handshake…  (try ./demo/run.sh --attach)`}
+                {() => `  ${status.get()} — waiting for the first WebSocket handshake…  (try ./demo/run.sh attach)`}
               </Text>
             );
           }

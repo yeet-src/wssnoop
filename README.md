@@ -102,10 +102,12 @@ make bpf         # clang + bpftool → bin/probe.bpf.o (+ vmlinux.h from kernel 
 One command brings up traffic and the UI, with no browser:
 
 ```sh
-./demo/run.sh --attach     # 3 worker processes × (coinbase+kraken+polymarket),
-                           # then wssnoop attached to all of them
-./demo/run.sh              # just the traffic; prints the attach command
-./demo/run.sh --stop       # stop the workers
+./demo/run.sh attach     # 3 worker processes × (coinbase+kraken+polymarket),
+                         # then wssnoop attached to all of them
+./demo/run.sh start      # just the traffic; prints the attach command
+./demo/run.sh status     # which workers are running
+./demo/run.sh stop       # stop the workers
+./demo/run.sh            # (or `help`) usage
 ```
 
 The workers (`demo/worker.mjs`) run as distinct processes (`order-router`,

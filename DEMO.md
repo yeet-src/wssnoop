@@ -9,7 +9,7 @@ all from the encrypted side, with eBPF.**
 ```sh
 cd ~/src/yeet/wssnoop
 make bpf                 # build the probe object (if not already built)
-./demo/run.sh --attach   # 3 worker processes, live traffic, wssnoop attached
+./demo/run.sh attach   # 3 worker processes, live traffic, wssnoop attached
 ```
 
 That's it — the screen fills with three processes (`order-router`, `md-gateway`,
@@ -54,7 +54,7 @@ Quit with `q`. (`Esc` backs out: clear filter → close inspector → quit.)
 
 - **Rows show `?` for role/dest**: a mid-stream attach (connection opened before
   wssnoop). It self-heals as connections recycle; or just `q` and re-run
-  `./demo/run.sh --attach` (it starts the workers first so handshakes are caught).
+  `./demo/run.sh attach` (it starts the workers first so handshakes are caught).
 - **"probe failed" / hangs on attach**: the daemon got into a bad state (usually
   from a hard kill leaking a BPF attach). Restart it and retry:
   ```sh
