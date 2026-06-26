@@ -1,59 +1,64 @@
 #!/usr/bin/env bash
-# Single-command launcher for the wssnoop demo.
+# wssnoop demo — one command, no browser.
 #
-# Ensures the Lima VM is up, installs Node + deps inside it, then runs the Node
-# server in the foreground over an `ssh -L` tunnel. The server binds inside the
-# VM and the tunnel forwards it to the macOS host, so the page opens at
-# http://localhost:PORT in the host browser. Ctrl-C stops the server + tunnel.
+# Launches several worker processes (distinct identities), each holding multiple
+# live wss:// connections (coinbase + kraken + polymarket) and continuously
+# churning subscriptions, so wssnoop has rich multi-process, multi-connection,
+# bidirectional traffic to show immediately.
 #
-# Why ssh -L rather than Lima's port auto-forward: the auto-forward proved
-# flaky for this bind, and a foreground tunnel makes "one command, one lifetime"
-# trivial — the command IS the running server.
-
+#   ./demo/run.sh             start the traffic, print the wssnoop attach command
+#   ./demo/run.sh --attach    start the traffic AND launch wssnoop attached to it
+#   ./demo/run.sh --stop      stop all demo workers
+#
+# Run it inside the yeet VM (where node + yeet live). Attaches by --bin <node>
+# with no --pid, so wssnoop sees every worker — current and future.
 set -euo pipefail
 
-PORT="${PORT:-8080}"
-YEET_DIR="${YEET_DIR:-/Users/ben/src/yeet/yeet}"
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$DEMO_DIR/.." && pwd)"
+cd "$DEMO_DIR"
+# shellcheck disable=SC1091
+. "$HOME/.nvm/nvm.sh" 2>/dev/null || true
 
-run_server='. "$HOME/.nvm/nvm.sh" 2>/dev/null || true; cd "'"$DEMO_DIR"'" && npm install --no-audit --no-fund >/dev/null 2>&1 && PORT='"$PORT"' exec node server.js'
+ROLES=(order-router md-gateway risk-engine)
 
-# On Linux just run directly; on macOS go through the VM (per project CLAUDE.md).
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  cd "$DEMO_DIR"; npm install --no-audit --no-fund; exec env PORT="$PORT" node server.js
+stop() {
+  for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
+  pkill -f "worker.mjs" 2>/dev/null || true
+}
+
+if [[ "${1:-}" == "--stop" ]]; then stop; echo "stopped demo workers"; exit 0; fi
+
+command -v node >/dev/null || { echo "node not found — is nvm sourced?"; exit 1; }
+npm install --no-audit --no-fund >/dev/null 2>&1 || true
+
+start_workers() {
+  for r in "${ROLES[@]}"; do
+    nohup node worker.mjs --role "$r" --feeds coinbase,kraken,poly \
+      >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
+  done
+}
+
+NODE="$(command -v node)"
+YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet)"
+
+stop
+sleep 1
+
+if [[ "${1:-}" == "--attach" ]]; then
+  # Start wssnoop first so it captures every handshake; bring the workers up a
+  # beat later (in the background) once the uprobes are attached.
+  ( sleep 3; cd "$DEMO_DIR"; start_workers ) >/dev/null 2>&1 &
+  echo ">> launching wssnoop; workers start in ~3s…"
+  cd "$REPO_DIR"
+  exec "$YEET" run src/main.jsx -- --bin "$NODE"
 fi
 
-# --- macOS: drive the Lima VM -----------------------------------------------
-
-VM="$(limactl list 2>/dev/null | awk '/^yeet\./ && ($2=="Running"||$2=="Started"){print $1; exit}')"
-if [[ -z "${VM:-}" ]]; then
-  echo ">> No yeet.* VM running; bringing up default via 'make vm'…"
-  make -C "$YEET_DIR" vm
-  VM="$(limactl list 2>/dev/null | awk '/^yeet\./ && ($2=="Running"||$2=="Started"){print $1; exit}')"
-fi
-echo ">> Using VM: $VM"
-
-SSHCFG="$HOME/.lima/$VM/ssh.config"
-SSH_HOST="$(awk '/^Host /{print $2; exit}' "$SSHCFG")"
-in_vm() { ssh -F "$SSHCFG" "$SSH_HOST" "$@"; }
-
-# Install Node if the VM doesn't have it. nvm keeps it user-local and avoids
-# apt's stale Node; the resulting node still statically links OpenSSL — exactly
-# the SSL_read/SSL_write path the snoop hooks.
-if ! in_vm 'bash -lc "command -v node >/dev/null 2>&1"'; then
-  echo ">> Installing Node in VM (one-time)…"
-  in_vm 'bash -lc '\''set -e
-    export NVM_DIR="$HOME/.nvm"; mkdir -p "$NVM_DIR"
-    [ -s "$NVM_DIR/nvm.sh" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-    . "$NVM_DIR/nvm.sh"; nvm install --lts'\'''
-fi
-
-in_vm 'bash -lc "pkill -f \"node server.js\" 2>/dev/null; true"' || true
-
-# Free the host port: a leftover ssh -L tunnel from a prior run would both
-# block our forward and serve a dead connection.
-lsof -nP -tiTCP:"$PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
-
-echo ">> Starting server in VM, forwarding to host :$PORT"
-echo ">> Open http://localhost:$PORT  (Ctrl-C here stops the server)"
-exec ssh -F "$SSHCFG" -L "$PORT:localhost:$PORT" "$SSH_HOST" "bash -lc '$run_server'"
+start_workers
+sleep 1
+echo ">> ${#ROLES[@]} workers up: ${ROLES[*]}"
+echo ">> each holds coinbase + kraken + polymarket connections, churning subscriptions"
+echo ">> logs: /tmp/wssnoop-<role>.log"
+echo ">>"
+echo ">> attach wssnoop (sees all workers — no --pid needed):"
+echo ">>     $YEET run src/main.jsx -- --bin $NODE"
