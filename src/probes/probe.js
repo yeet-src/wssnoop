@@ -4,7 +4,7 @@
  * subscribe, teardown) and knows nothing about what the bytes mean — that's
  * lib/decode.js's job. */
 
-import { BpfObject, RingBuf } from "yeet:bpf";
+import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
 
 // bin/probe.bpf.o sits at the project root (src/bpf/wssnoop.bpf.c links into
 // it — see build/bpf.mk). `base: import.meta.dirname` anchors the lookup on
@@ -34,10 +34,23 @@ export async function snoop({ bin, pid, onEvent, onError }) {
 
   const control = await probe
     .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
+    .bind("focus", { kind: "array" }) // writable capture-filter (slot 0 ssl, 1 pid)
     .attach("probe_ssl_write", { ...uprobe, symbol: "SSL_write" })
     .attach("probe_ssl_read_enter", { ...uprobe, symbol: "SSL_read" })
     .attach("probe_ssl_read_exit", { ...uprobe, symbol: "SSL_read" })
     .start();
+
+  /* The user→kernel control path: write the BPF capture filter live so the
+   * probe only emits the focused connection's (or process's) events. */
+  const focus = new ArrayMap(control, "focus");
+  const setFocus = async ({ ssl = 0n, pid = 0 } = {}) => {
+    try {
+      await focus.update(0, BigInt(ssl || 0));
+      await focus.update(1, BigInt(pid || 0));
+    } catch (err) {
+      if (onError) onError(err);
+    }
+  };
 
   const events = new RingBuf(control, "events");
   const sub = await events.subscribe(
@@ -57,6 +70,7 @@ export async function snoop({ bin, pid, onEvent, onError }) {
   );
 
   return {
+    setFocus,
     async stop() {
       await sub.unsubscribe();
       await control.stop();

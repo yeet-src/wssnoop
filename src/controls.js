@@ -118,6 +118,16 @@ export const closeInspector = () => {
 };
 export const isInspecting = () => selected.get() != null;
 
+/* ---- kernel capture focus (user → kernel write) ---------------------- */
+/* The connection key the BPF filter is pinned to, or null for "capture all".
+ * state.js watches this and patches the probe's .bss globals, so focusing a
+ * connection silences every other one IN THE KERNEL — targeted, near-zero
+ * overhead capture. A UI control, but it really does reach down into eBPF. */
+export const focusKey = signal(null);
+export const setFocus = (key) => focusKey.set(key);
+export const clearFocus = () => focusKey.set(null);
+export const isFocused = (key) => focusKey.get() === key;
+
 export const hoverTitle = signal(""); // current tooltip, shown in the minibuffer
 
 /* Transient status line (e.g. "copied 42 messages"). Shown in the minibuffer

@@ -8,7 +8,7 @@
  * (Button → controls.hoverTitle). Labels are thunks over the control signals, so
  * a click repaints the label in place. */
 
-import { Box, Text, bold, fg } from "yeet:tui";
+import { Box, Text, bold, fg, bg } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
@@ -20,6 +20,7 @@ import {
   filters, cycleRole, toggleActive,
   collapse, COLLAPSE_LABELS, cycleAll,
   search, searchActive, startSearch,
+  focusKey, clearFocus,
   tip,
 } from "../controls.js";
 
@@ -35,6 +36,16 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         <Box {...tip("live totals — open WebSocket connections · messages decoded")}>
           <Text break="none">
             {() => fg(COL.dim)(`${stats.get().conns} ws · ${stats.get().msgs} msgs`)}
+          </Text>
+        </Box>
+        {/* capture-focus indicator: visible only when the kernel filter is
+            pinned to one connection; click to release. */}
+        <Box
+          onClick={clearFocus}
+          {...tip("eBPF capture is focused on one connection (others silenced in-kernel) — click to release")}
+        >
+          <Text break="none">
+            {() => (focusKey.get() ? bg(COL.accent)(fg(COL.ink)(bold(" ⊙ focused ✕ "))) : "")}
           </Text>
         </Box>
         <Box width="1fr" />

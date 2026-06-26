@@ -39,6 +39,9 @@ import {
   inspectRaw as raw,
   toggleDetails,
   toggleRaw,
+  setFocus,
+  clearFocus,
+  isFocused,
 } from "../controls.js";
 
 /* Everything a free-text query tests a message against. */
@@ -277,6 +280,16 @@ export default function Inspector({ groups, now, size }) {
             }}
           </Text>
           <Box width="1fr" height={1} />
+          <Button
+            title="focus eBPF capture on just this connection — every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
+            onClick={() => {
+              const k = selected.get();
+              isFocused(k) ? clearFocus() : setFocus(k);
+            }}
+            active={() => isFocused(selected.get())}
+          >
+            {() => (isFocused(selected.get()) ? "⊙ focused" : "⊙ focus")}
+          </Button>
           <Button
             title="follow live (newest first) vs. pause to read history — scrolling or expanding pauses automatically"
             onClick={togglePause}

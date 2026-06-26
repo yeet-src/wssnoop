@@ -74,19 +74,43 @@ struct {
     __uint(max_entries, 10240);
 } active_reads SEC(".maps");
 
+/* User-writable capture filter — the user->kernel control path. JS writes two
+ * slots live (yeet:bpf ArrayMap.update): slot 0 a focus SSL*, slot 1 a focus
+ * pid. When a slot is nonzero, only matching events are emitted; zero (the
+ * default) captures everything. Filtering happens before the ringbuf reserve,
+ * so muted traffic costs almost nothing — the "target one connection on a busy
+ * production node, zero overhead for the rest" story. */
+#define FOCUS_SSL 0
+#define FOCUS_PID 1
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 2);
+} focus SEC(".maps");
+
 static __always_inline void emit(__u64 ssl, __u64 buf, __u32 len, __u8 dir)
 {
     if (len == 0)
+        return;
+
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 pid = id >> 32;
+    __u32 k_ssl = FOCUS_SSL, k_pid = FOCUS_PID;
+    __u64 *f_ssl = bpf_map_lookup_elem(&focus, &k_ssl);
+    __u64 *f_pid = bpf_map_lookup_elem(&focus, &k_pid);
+    if (f_ssl && *f_ssl && ssl != *f_ssl)
+        return;
+    if (f_pid && *f_pid && pid != (__u32) *f_pid)
         return;
 
     struct ssl_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e)
         return;
 
-    __u64 id = bpf_get_current_pid_tgid();
     e->ts = bpf_ktime_get_ns();
     e->ssl = ssl;
-    e->pid = id >> 32;
+    e->pid = pid;
     e->tid = (__u32) id;
     e->len = len;
     e->dir = dir;

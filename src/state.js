@@ -36,6 +36,7 @@ import { computed, from, signal } from "yeet:tui";
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
+import { focusKey } from "./controls.js";
 
 /* Idle eviction matches the max viz range — a conn silent longer than the
  * longest sparkline window can show carries no visible data, so drop it. */
@@ -365,11 +366,31 @@ export function createSession({ bin, pid, debug = false } = {}) {
     const decoder = createDecoder({ debug });
     const reg = createRegistry();
 
+    /* The probe's live capture-filter setter, once the attach resolves. The UI
+     * sets controls.focusKey (`${pid}:${ssl}` | null); we mirror it into the
+     * kernel here — the tap owns the probe session, so this control→kernel
+     * bridge belongs at this seam. */
+    let focusFn = null;
+    let lastFocus = undefined;
+    const syncFocus = () => {
+      if (!focusFn) return;
+      const key = focusKey.get();
+      if (key === lastFocus) return;
+      lastFocus = key;
+      if (key == null) {
+        focusFn({ ssl: 0n, pid: 0 });
+      } else {
+        const i = key.indexOf(":");
+        focusFn({ ssl: BigInt(key.slice(i + 1)), pid: Number(key.slice(0, i)) });
+      }
+    };
+
     /* error records degrade to the stats line: bump the event counter and let
      * the header surface it. We keep a small status string for the header. */
     let lastMember = -1;
     const publish = () => {
       const now = Date.now();
+      syncFocus();
       reg.evict(now);
       const snap = reg.snapshot();
       /* Republish the group structure only when membership changed; the clock
@@ -405,6 +426,8 @@ export function createSession({ bin, pid, debug = false } = {}) {
     })
       .then((s) => {
         status.set("tracing");
+        focusFn = s.setFocus; /* enable the capture-focus control */
+        syncFocus();
         return s;
       })
       .catch((e) => {
