@@ -60,7 +60,15 @@ postgen: | vendored-git
 		echo "warning: no git available (vendored or host); skipping 'git init'" >&2; \
 	fi
 
+# Unit tests run *in the yeet isolate* (so yeet:compression and friends
+# resolve), not under node — the modules under test are pure, so this needs no
+# BPF, daemon, or UI. Exits nonzero on any failure. Override YEET if it isn't on
+# PATH (e.g. YEET=/opt/yeet/crates/target/release/yeet make test).
+YEET ?= yeet
+test:
+	$(YEET) run test/lib.test.js
+
 clean: clean-bpf
 	rm -rf node_modules dist src/index.jsx
 
-.PHONY: all bundle clean postgen
+.PHONY: all bundle clean postgen test

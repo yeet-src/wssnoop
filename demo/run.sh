@@ -10,8 +10,19 @@
 #   ./demo/run.sh --attach    start the traffic AND launch wssnoop attached to it
 #   ./demo/run.sh --stop      stop all demo workers
 #
+# Traffic-shaping knobs (pass as FLAGS, not env vars — the VM's login shell is
+# fish, which silently ignores `VAR=val ./run.sh`, so flags are the safe path):
+#   --recycle MS   recycle each connection every ~MS (jittered ×1–2); 0 = never
+#   --no-deflate   disable permessage-deflate on the workers
+#   --abrupt       recycle by terminate() (no CLOSE/shutdown) — exercises resets
+# (Env vars RECYCLE / NODEFLATE / ABRUPT still work as fallback defaults.)
+#
 # Run it inside the yeet VM (where node + yeet live). Attaches by --bin <node>
 # with no --pid, so wssnoop sees every worker — current and future.
+#
+# NB: do NOT redirect wssnoop's stdout (`… > out.log`) — yeet only injects the
+# `tty` global when stdout is a pty, so a redirect makes the script die with
+# "tty is not defined". Watch the daemon log instead (see YEET-DX-NOTES.md #5).
 set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,12 +33,31 @@ cd "$DEMO_DIR"
 
 ROLES=(order-router md-gateway risk-engine)
 
+# Knobs default from the environment (back-compat) and are overridden by flags.
+ATTACH=""
+STOP=""
+RECYCLE="${RECYCLE:-0}"
+NODEFLATE="${NODEFLATE:-}"
+ABRUPT="${ABRUPT:-}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --attach)     ATTACH=1 ;;
+    --stop)       STOP=1 ;;
+    --recycle)    RECYCLE="$2"; shift ;;
+    --recycle=*)  RECYCLE="${1#*=}" ;;
+    --no-deflate) NODEFLATE=1 ;;
+    --abrupt)     ABRUPT=1 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
 stop() {
   for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   pkill -f "worker.mjs" 2>/dev/null || true
 }
 
-if [[ "${1:-}" == "--stop" ]]; then stop; echo "stopped demo workers"; exit 0; fi
+if [[ "$STOP" == 1 ]]; then stop; echo "stopped demo workers"; exit 0; fi
 
 command -v node >/dev/null || { echo "node not found — is nvm sourced?"; exit 1; }
 npm install --no-audit --no-fund >/dev/null 2>&1 || true
@@ -38,9 +68,9 @@ start_workers() {
   local delay="${1:-0}"
   for r in "${ROLES[@]}"; do
     # Default: no recycle — --attach already gives clean handshakes, so steady
-    # feeds make a calmer demo. Set RECYCLE=<ms> to exercise reconnect churn.
+    # feeds make a calmer demo. Pass --recycle <ms> to exercise reconnect churn.
     setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
-      --recycle "${RECYCLE:-0}" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
+      --recycle "$RECYCLE" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
       >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
   done
 }
@@ -51,7 +81,7 @@ YEET="$(command -v yeet 2>/dev/null || echo /opt/yeet/crates/target/release/yeet
 stop
 sleep 1
 
-if [[ "${1:-}" == "--attach" ]]; then
+if [[ "$ATTACH" == 1 ]]; then
   # A `--bin <node>` attach only hooks processes that exist when it attaches, so
   # the workers must be running first — but we still want wssnoop to catch their
   # handshakes. So start the worker processes now with a connect-delay, then
