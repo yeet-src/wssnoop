@@ -117,6 +117,31 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   ok(f && f.consumed === full.length, "parseFrame consumes whole frame");
 }
 
+/* ==== decode: robustness paths ====================================== */
+{
+  // truncated chunk (cap_len < len) abandons the stream permanently
+  const d = createDecoder();
+  d.push(evt(frame({ opcode: 0x1, payload: bytes("hello-world") })));
+  const out = d.push({ ...evt(new Uint8Array(10)), cap_len: 10, len: 100 });
+  ok(out.some((e) => e.type === "truncated"), "truncated emitted when cap_len < len");
+  const after = d.push(evt(frame({ opcode: 0x1, payload: bytes("more-data-here") })));
+  eq(after.filter((e) => e.type === "message").length, 0, "no messages after truncation (stream done)");
+}
+{
+  // absurd 127-length is flagged corrupt, not buffered
+  const hugeLen = new Uint8Array([0x81, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+  const f = parseFrame(hugeLen);
+  ok(f && f.corrupt, "parseFrame flags an absurd length as corrupt");
+}
+{
+  // an HTTP handshake arriving mid-frames (SSL* reuse) resets the stream
+  const d = createDecoder();
+  d.push(evt(frame({ opcode: 0x1, payload: bytes("first-message-data") })));
+  const http = bytes("GET /ws HTTP/1.1\r\nHost: x.com\r\nUpgrade: websocket\r\n\r\n");
+  const out = d.push(evt(http));
+  ok(out.some((e) => e.type === "reset"), "HTTP mid-stream emits a reset");
+}
+
 /* ==== export ========================================================= */
 {
   eq(base64(bytes("Man")), "TWFu", "base64 3-byte group");
@@ -200,6 +225,14 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(c.opcodes.TEXT, 2, "registry: opcode histogram");
   eq([c.wireBytes, c.inflatedBytes], [14, 30], "registry: wire vs inflated byte sums");
   eq(c.msgs.size, 2, "registry: messages retained in ring");
+}
+{
+  // an ingress handshake (the upgrade request arrives) => we are the server
+  const reg = createRegistry();
+  reg.ingest({ type: "handshake", pid: 4, ssl: 40n, dir: DIR_READ, startLine: "GET /socket HTTP/1.1", headers: { host: "us.local" } }, 1);
+  const c = reg.snapshot().groups[0].conns[0];
+  eq(c.role, "server", "registry: role=server from ingress handshake");
+  eq(c.dest, "?", "registry: server dest unknown");
 }
 {
   // a non-websocket on the SSL* forgets the connection
