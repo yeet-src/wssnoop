@@ -17,10 +17,10 @@ import { tip, inspect } from "../controls.js";
 
 const roleTip = (c) =>
   c.role === "client"
-    ? "role: client — this process opened the connection"
+    ? "role: client · this process opened the connection"
     : c.role === "server"
-      ? "role: server — this process is serving the connection"
-      : "role: unknown — attached mid-stream (no handshake seen)";
+      ? "role: server · this process is serving the connection"
+      : "role: unknown · attached mid-stream (no handshake seen)";
 
 export default function Row({ conn, now, span, geom, order, visible }) {
   return (
@@ -33,7 +33,7 @@ export default function Row({ conn, now, span, geom, order, visible }) {
         inspect(conn);
         e.stopPropagation();
       }}
-      {...tip(() => `connection #${conn.conn} — click to inspect its messages`)}
+      {...tip(() => `connection #${conn.conn} · click to inspect its messages`)}
     >
       <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
         <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>

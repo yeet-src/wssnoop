@@ -133,11 +133,11 @@ export const isInspecting = () => selected.get() != null;
 export const focusKey = signal(null);
 export const setFocus = (key) => {
   focusKey.set(key);
-  flash("eBPF capture pinned to this connection — every other one is now silenced in the kernel");
+  flash("eBPF capture pinned to this connection · every other one is now silenced in the kernel");
 };
 export const clearFocus = () => {
   focusKey.set(null);
-  flash("capture focus released — all connections live again");
+  flash("capture focus released · all connections live again");
 };
 export const isFocused = (key) => focusKey.get() === key;
 
@@ -153,16 +153,16 @@ const next = (arr, v) => arr[(arr.indexOf(v) + 1) % arr.length];
 export const titles = {
   search: () =>
     searchActive.get() || search.get()
-      ? `search (/) — filtering “${search.get()}”; Esc clears`
-      : "search (/) — filter messages while inspecting, connections otherwise",
-  sort: () => `sort (s) — now ${SORT_LABELS[sortKey.get()]}; press s for ${SORT_LABELS[next(SORTS, sortKey.get())]}`,
-  role: () => `role (r) — now ${filters.get().role}; press r for ${next(ROLES, filters.get().role)}`,
+      ? `search (/) · filtering “${search.get()}”; Esc clears`
+      : "search (/) · filter messages while inspecting, connections otherwise",
+  sort: () => `sort (s) · now ${SORT_LABELS[sortKey.get()]}; press s for ${SORT_LABELS[next(SORTS, sortKey.get())]}`,
+  role: () => `role (r) · now ${filters.get().role}; press r for ${next(ROLES, filters.get().role)}`,
   active: () =>
-    `idle rows (i) — now ${filters.get().activeOnly ? "hidden" : "shown"}; press i to ${filters.get().activeOnly ? "show" : "hide"} them`,
+    `idle rows (i) · now ${filters.get().activeOnly ? "hidden" : "shown"}; press i to ${filters.get().activeOnly ? "show" : "hide"} them`,
   rows: () =>
-    `rows per process (a) — now ${COLLAPSE_LABELS[collapse.get().global]}; press a for ${COLLAPSE_LABELS[next(COLLAPSE_STEPS, collapse.get().global)]}`,
-  vizDown: () => `shorter activity window ([) — now ${RANGE_LABELS[vizRange.get()]}`,
-  vizUp: () => `longer activity window (]) — now ${RANGE_LABELS[vizRange.get()]}`,
+    `rows per process (a) · now ${COLLAPSE_LABELS[collapse.get().global]}; press a for ${COLLAPSE_LABELS[next(COLLAPSE_STEPS, collapse.get().global)]}`,
+  vizDown: () => `shorter activity window ([) · now ${RANGE_LABELS[vizRange.get()]}`,
+  vizUp: () => `longer activity window (]) · now ${RANGE_LABELS[vizRange.get()]}`,
 };
 
 /* command-mode key → action. `/`, `q`, and Esc are handled in main.jsx (they

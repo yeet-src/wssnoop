@@ -174,7 +174,7 @@ export default function Inspector({ groups, now, size }) {
           : rec.compressed
             ? " · ⚙ arrived compressed (shown decoded)"
             : "";
-        return `message #${rec.seq} — ${rec.name}, ${fmtBytes(rec.len)}${badge}; click to ${expanded.get() === rec.seq ? "collapse" : "expand"}`;
+        return `message #${rec.seq} · ${rec.name}, ${fmtBytes(rec.len)}${badge}; click to ${expanded.get() === rec.seq ? "collapse" : "expand"}`;
       })}
     >
       <Text break="none">
@@ -223,7 +223,7 @@ export default function Inspector({ groups, now, size }) {
     let kind, warn = null, lines;
     const json = rec.text != null ? parseJson(rec.text) : undefined; // on demand
     if (rec.inflateError) {
-      warn = `⚠ inflate failed: ${rec.inflateError} — raw deflate bytes`;
+      warn = `⚠ inflate failed: ${rec.inflateError} · raw deflate bytes`;
       lines = hexDump(rec.bytes).split("\n");
       kind = "hex";
     } else if (showRaw) {
@@ -271,7 +271,7 @@ export default function Inspector({ groups, now, size }) {
         height="1fr"
         bg={COL.scrim}
         onClick={closeInspector}
-        {...tip("inspector — click here or press Esc to close")}
+        {...tip("inspector · click here or press Esc to close")}
       />
 
       {/* the floating panel + its drop-shadow. The wrapper carries a border on
@@ -314,8 +314,8 @@ export default function Inspector({ groups, now, size }) {
           <Button
             title={() =>
               isFocused(selected.get())
-                ? "⊙ focused — capture pinned to this connection in the kernel; click to release all connections"
-                : "⊙ focus eBPF capture on just this connection — every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
+                ? "⊙ focused · capture pinned to this connection in the kernel; click to release all connections"
+                : "⊙ focus eBPF capture on just this connection · every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
             }
             onClick={() => {
               const k = selected.get();
@@ -328,8 +328,8 @@ export default function Inspector({ groups, now, size }) {
           <Button
             title={() =>
               frozen.get()
-                ? "❚❚ paused — reading history; click to resume following newest first"
-                : "● live — following newest first; click to pause (scrolling or expanding also pauses)"
+                ? "❚❚ paused · reading history; click to resume following newest first"
+                : "● live · following newest first; click to pause (scrolling or expanding also pauses)"
             }
             onClick={togglePause}
             active={() => frozen.get()}
@@ -347,7 +347,7 @@ export default function Inspector({ groups, now, size }) {
           direction="column"
           height="fit"
           break="none"
-          {...tip("connection summary — ↑/↓ are message counts then byte totals; ⚙ N× is the permessage-deflate compression ratio (decoded ÷ on-wire); ✂ marks a truncated capture")}
+          {...tip("connection summary · ↑/↓ are message counts then byte totals; ⚙ N× is the permessage-deflate compression ratio (decoded ÷ on-wire); ✂ marks a truncated capture")}
         >
           {() => {
             const c = lookup();
@@ -390,7 +390,7 @@ export default function Inspector({ groups, now, size }) {
             ];
             if (more) {
               const row = (k, v) => (
-                <Text break="anywhere">{[fg(COL.header)(k.padEnd(9)), fg(COL.dim)(v || "—")]}</Text>
+                <Text break="anywhere">{[fg(COL.header)(k.padEnd(9)), fg(COL.dim)(v || "·")]}</Text>
               );
               const ops = Object.entries(c.opcodes)
                 .map(([k, v]) => `${k} ${v}`)
@@ -435,8 +435,8 @@ export default function Inspector({ groups, now, size }) {
               <Button
                 title={() =>
                   raw.get()
-                    ? "⌗ showing raw bytes (hex) — click for the decoded view"
-                    : "⌗ showing the decoded view — click for raw bytes (hex)"
+                    ? "⌗ showing raw bytes (hex) · click for the decoded view"
+                    : "⌗ showing the decoded view · click for raw bytes (hex)"
                 }
                 onClick={toggleRaw}
                 active={() => raw.get()}
@@ -466,7 +466,7 @@ export default function Inspector({ groups, now, size }) {
           <Box width="1fr" height="1fr" overflow="hidden">
             {() => {
               const c = lookup();
-              if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;
+              if (!c) return <Text break="none">{fg(COL.dim)("  ·")}</Text>;
               now.get(); /* refresh the tail each heartbeat while following live */
               raw.get(); /* re-render the expanded payload when raw/decoded flips */
               const all = currentMsgs(); /* frozen/live tail, narrowed by the query */

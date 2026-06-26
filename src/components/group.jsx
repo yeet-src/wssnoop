@@ -36,9 +36,9 @@ export default function Group({ group, conns, now, span, geom, order }) {
     const ctr = id?.container ? ` · container ${id.container}` : "";
     const state =
       id && id.alive === false
-        ? " · STOPPED (process exited — its rows linger until the connections idle out)"
+        ? " · STOPPED (process exited; its rows linger until the connections idle out)"
         : "";
-    return `process ${pid}${cmd ? ` — ${cmd}` : ""}${ctr}${state} — ${conns.length} WebSocket connection(s)`;
+    return `process ${pid}${cmd ? ` · ${cmd}` : ""}${ctr}${state} · ${conns.length} WebSocket connection(s)`;
   };
 
   const ranks = computed(() => {
@@ -76,7 +76,7 @@ export default function Group({ group, conns, now, span, geom, order }) {
             title={() => {
               const cur = collapseFor(pid);
               const lbl = procInfo.get()[pid]?.label ?? `pid ${pid}`;
-              return `rows for ${lbl} — now ${COLLAPSE_LABELS[cur]}; click for ${COLLAPSE_LABELS[nextCollapse(cur)]}`;
+              return `rows for ${lbl} · now ${COLLAPSE_LABELS[cur]}; click for ${COLLAPSE_LABELS[nextCollapse(cur)]}`;
             }}
             onClick={() => cycleGroup(pid)}
           >

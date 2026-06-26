@@ -26,9 +26,9 @@ const GLYPH = 0x2580; // "▀" upper half block (a single code point → stored 
 /* Default tooltips — the chart's meaning isn't self-evident, so each variant
  * explains itself in the minibuffer on hover. */
 const TITLES = {
-  conn: "connection traffic — bytes/sec per column; upper half = sent (egress), lower = received (ingress); brighter = more",
-  agg: "process total — bytes/sec across all its connections; upper = sent, lower = received; brighter = more",
-  global: "all processes — total bytes/sec; upper = sent, lower = received; brighter = more",
+  conn: "connection traffic · bytes/sec per column; upper half = sent (egress), lower = received (ingress); brighter = more",
+  agg: "process total · bytes/sec across all its connections; upper = sent, lower = received; brighter = more",
+  global: "all processes · total bytes/sec; upper = sent, lower = received; brighter = more",
 };
 
 export default function Sparkline({ hist, now, span, width, variant = "conn", title }) {

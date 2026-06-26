@@ -38,7 +38,7 @@ function Resizer() {
       setHover={hov}
       onMouseDown={startColDrag}
       onDblClick={resetColWidth}
-      {...tip("drag to resize the DEST / ACTIVITY split — double-click to auto-fit")}
+      {...tip("drag to resize the DEST / ACTIVITY split · double-click to auto-fit")}
     >
       <Text break="none">
         {() => (hov.get() || dragging.get() ? face({ fg: COL.accent })("│") : face({ fg: COL.header })("┊"))}
@@ -68,7 +68,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             don't reliably keep their gap (a box around a dynamic thunk
             under-measures its right edge), so spacing is explicit inside one
             Text instead. */}
-        <Box break="none" {...tip("wssnoop — uprobe tap status · open WebSocket connections · messages decoded")}>
+        <Box break="none" {...tip("wssnoop · uprobe tap status · open WebSocket connections · messages decoded")}>
           <Text break="none">
             {() => [
               face({ bold: true, fg: COL.title })("wssnoop  "),
@@ -81,7 +81,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         <Box
           break="none"
           onClick={clearFocus}
-          {...tip("eBPF capture is focused on one connection (others silenced in-kernel) — click to release")}
+          {...tip("eBPF capture is focused on one connection (others silenced in-kernel) · click to release")}
         >
           <Text break="none">
             {() => {
@@ -127,7 +127,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           padding={[0, 0, 0, INDENT]}
           break="none"
           overflow="hidden"
-          {...tip("ALL — every traced process and connection, combined")}
+          {...tip("ALL: every traced process and connection, combined")}
         >
           <Text break="none" bold fg={COL.accent}>ALL</Text>
         </Box>
@@ -141,18 +141,18 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           the activity caption is the drag-to-resize grip) */}
       <Box direction="row" height={1} overflow="hidden">
         <Box width={() => geom().left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
-          <Box width={W_ROLE} {...tip("ROLE — client (we opened it) or server (we serve it)")}>
+          <Box width={W_ROLE} {...tip("ROLE: client (we opened it) or server (we serve it)")}>
             <Text fg={COL.header} break="none">ROLE</Text>
           </Box>
-          <Box width={() => geom().dest} overflow="hidden" {...tip("DEST — destination wss:// URL for client connections; '?' for served ones")}>
+          <Box width={() => geom().dest} overflow="hidden" {...tip("DEST: destination wss:// URL for client connections; '?' for served ones")}>
             <Text fg={COL.header} break="none">DEST</Text>
           </Box>
-          <Box width={W_MSG} {...tip("MSG — WebSocket messages sent (↑) and received (↓)")}>
+          <Box width={W_MSG} {...tip("MSG: WebSocket messages sent (↑) and received (↓)")}>
             <Text fg={COL.header} break="none">MSG ↑/↓</Text>
           </Box>
         </Box>
         <Resizer />
-        <Box {...tip("ACTIVITY — bytes/sec over the window; upper half = sent, lower = received; brighter = more")}>
+        <Box {...tip("ACTIVITY: bytes/sec over the window; upper half = sent, lower = received; brighter = more")}>
           <Text break="none" fg={COL.header}>
             {() => `ACTIVITY · last ${RANGE_LABELS[vizRange.get()]} (▀ up / ▄ down)`}
           </Text>
