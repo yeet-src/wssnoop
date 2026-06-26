@@ -123,6 +123,39 @@ export function createTimeHist({ bucketMs = 2000, buckets = 900 } = {}) { // 30m
   };
 }
 
+/* A read-only TimeHist that is the pointwise sum of several others — the
+ * aggregate a container (or any grouping) shows. It only needs the read surface
+ * the UI touches: `window` (the sparkline + recentBytes) and the byte totals
+ * (sort). Cheap to rebuild, so callers re-mint it when membership changes. */
+export function mergeHists(hists) {
+  return {
+    window(now, spanMs, cols) {
+      const c = Math.max(1, Math.floor(cols));
+      const up = new Array(c).fill(0);
+      const down = new Array(c).fill(0);
+      let peak = 1;
+      for (const h of hists) {
+        const w = h.window(now, spanMs, c);
+        for (let i = 0; i < c; i++) {
+          up[i] += w.up[i];
+          down[i] += w.down[i];
+        }
+      }
+      for (let i = 0; i < c; i++) {
+        if (up[i] > peak) peak = up[i];
+        if (down[i] > peak) peak = down[i];
+      }
+      return { up, down, peak };
+    },
+    get totalUp() {
+      return hists.reduce((s, h) => s + h.totalUp, 0);
+    },
+    get totalDown() {
+      return hists.reduce((s, h) => s + h.totalDown, 0);
+    },
+  };
+}
+
 /* Standalone shape check — no BPF, no signals. Builds one hist, adds a ramp of
  * egress and a counter-phase ingress, and dumps a coarse window so the two
  * series and the left→right time order are eyeballable. */

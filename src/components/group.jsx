@@ -15,7 +15,7 @@ import Button from "./button.jsx";
 import Row from "./row.jsx";
 import Sparkline from "./sparkline.jsx";
 import { COL } from "./palette.js";
-import { GAP, HANDLE } from "./columns.js";
+import { GAP, HANDLE, INDENT } from "./columns.js";
 import {
   collapseFor, cycleGroup, COLLAPSE_STEPS, COLLAPSE_LABELS,
   sortKey, filters, tip,
@@ -23,10 +23,10 @@ import {
 import { connMetric, recentBytes, rankMap } from "../lib/rank.js";
 import { procInfo, resolve } from "../probes/procinfo.js";
 
-const glyph = (n) => (n === 0 ? "▸" : n === Infinity ? "▿" : "▾");
+const glyph = (n) => (n === 0 ? "▸" : "▾");
 const nextCollapse = (n) => COLLAPSE_STEPS[(COLLAPSE_STEPS.indexOf(n) + 1) % COLLAPSE_STEPS.length];
 
-export default function Group({ group, conns, now, span, geom, order }) {
+export default function Group({ group, conns, now, span, geom, order, depth = 0, visible }) {
   const { pid, hist } = group;
   resolve(pid); /* fire-and-forget identity lookup; cached, published reactively */
 
@@ -52,8 +52,9 @@ export default function Group({ group, conns, now, span, geom, order }) {
    * nothing to show — collapse the whole group (header included) to 0 so it
    * drops out rather than leaving an empty header bumping the rest down. */
   const shown = () =>
-    !filters.get().activeOnly ||
-    conns.some((c) => recentBytes(c.hist, now.get(), span.get()) > 0);
+    (!visible || visible()) && /* a collapsed container hides its processes */
+    (!filters.get().activeOnly ||
+      conns.some((c) => recentBytes(c.hist, now.get(), span.get()) > 0));
 
   return (
     <Box
@@ -69,7 +70,9 @@ export default function Group({ group, conns, now, span, geom, order }) {
         order={-1}
         {...tip(headerTip)}
       >
-        <Box width={geom.left} direction="row" gap={GAP} break="none">
+        {/* depth indents the process header (under a container); the left region
+            keeps its width so sparklines stay column-aligned. */}
+        <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, depth * INDENT]} break="none">
           {/* Stateful toggle: the glyph shows the current rows mode, and its
               tooltip names that mode and what the next click does. */}
           <Button
@@ -110,6 +113,7 @@ export default function Group({ group, conns, now, span, geom, order }) {
           now={now}
           span={span}
           geom={geom}
+          depth={depth}
           order={() => ranks.get().get(c.key) ?? 0}
           visible={() => {
             const r = ranks.get().get(c.key) ?? 1e9;

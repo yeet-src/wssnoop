@@ -13,6 +13,7 @@ import { Box, Text, Layer, computed } from "yeet:tui";
 
 import Toolbar from "./toolbar.jsx";
 import Group from "./group.jsx";
+import Container from "./container.jsx";
 import Inspector from "./inspector.jsx";
 import Minibuffer from "./minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
@@ -23,7 +24,9 @@ import {
   destWidth, dragging, endColDrag,
 } from "../controls.js";
 import { groupMetric, rankMap } from "../lib/rank.js";
+import { mergeHists } from "../lib/timehist.js";
 import { procInfo } from "../probes/procinfo.js";
+import { containers } from "../probes/containers.js";
 
 export default function Root({ size, groups, global, stats, status, clock }) {
   return (
@@ -68,23 +71,68 @@ export default function Root({ size, groups, global, stats, status, clock }) {
             return <Text break="none" italic fg={COL.dim}>  No WSS connections</Text>;
           }
 
-          const groupRank = computed(() => {
+          /* Optional outer tier: partition processes by their container id
+           * (procinfo derives it from the cgroup; null = not containerized).
+           * Each container becomes one top-level node wrapping its processes;
+           * uncontained processes stay at the top level beside them. */
+          const cmap = containers.get(); // shortId -> { name, image } (empty without Docker)
+          const byCtr = new Map();
+          for (const e of view) {
+            const cid = info[e.g.pid]?.container ?? null;
+            let arr = byCtr.get(cid);
+            if (!arr) byCtr.set(cid, (arr = []));
+            arr.push(e);
+          }
+          const nodes = [];
+          for (const [cid, members] of byCtr) {
+            if (cid === null)
+              for (const m of members)
+                nodes.push({ kind: "group", key: `g:${m.g.pid}`, g: m.g, conns: m.conns, hist: m.g.hist });
+            else
+              nodes.push({
+                kind: "container",
+                key: `c:${cid}`,
+                cid,
+                meta: cmap[cid] ?? null,
+                members,
+                hist: mergeHists(members.map((m) => m.g.hist)),
+                conns: members.flatMap((m) => m.conns),
+              });
+          }
+
+          /* One rank map over the top-level nodes (containers + bare groups),
+           * by the same metric — a container ranks by its merged activity. */
+          const topRank = computed(() => {
             const key = sortKey.get();
             const now = clock.get();
             const span = vizRange.get();
-            return rankMap(view.map((v) => v.g), (g) => g.pid, (g) => groupMetric(g, key, now, span));
+            return rankMap(nodes, (n) => n.key, (n) => groupMetric(n, key, now, span));
           });
 
-          return view.map(({ g, conns }) => (
-            <Group
-              group={g}
-              conns={conns}
-              now={clock}
-              span={vizRange}
-              geom={geom}
-              order={() => groupRank.get().get(g.pid) ?? 0}
-            />
-          ));
+          return nodes.map((n) =>
+            n.kind === "group" ? (
+              <Group
+                group={n.g}
+                conns={n.conns}
+                now={clock}
+                span={vizRange}
+                geom={geom}
+                order={() => topRank.get().get(n.key) ?? 0}
+              />
+            ) : (
+              <Container
+                cid={n.cid}
+                name={n.meta?.name}
+                image={n.meta?.image}
+                members={n.members}
+                hist={n.hist}
+                now={clock}
+                span={vizRange}
+                geom={geom}
+                order={() => topRank.get().get(n.key) ?? 0}
+              />
+            ),
+          );
         }}
         </Box>
         {() => (selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null)}

@@ -23,7 +23,7 @@ const roleTip = (c) =>
       ? "role: server · this process is serving the connection"
       : "role: unknown · attached mid-stream (no handshake seen)";
 
-export default function Row({ conn, now, span, geom, order, visible }) {
+export default function Row({ conn, now, span, geom, order, visible, depth = 0 }) {
   return (
     <Box
       direction="row"
@@ -37,7 +37,10 @@ export default function Row({ conn, now, span, geom, order, visible }) {
       }}
       {...hoverTip(conn.key, () => `connection #${conn.conn} · click to inspect its messages`)}
     >
-      <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
+      {/* a connection nests one level under its process header; under a
+          container that's one deeper. The left region keeps its width, so the
+          indent eats into DEST but the sparklines stay column-aligned. */}
+      <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, (depth + 1) * INDENT]} break="none">
         <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>
           {/* role colour is per-value, so a runtime face() patch, not a static attr */}
           <Text>{() => (now.get(), face({ fg: roleColor(conn.role) })(conn.role))}</Text>

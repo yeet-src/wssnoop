@@ -64,13 +64,13 @@ export const matches = (text, q = search.get()) =>
   !q || (text != null && String(text).toLowerCase().includes(q.toLowerCase()));
 
 /* ---- collapse (rows shown per process group) ------------------------- */
-/* n connections to show: 0 = collapsed (header only), 12 = default,
- * Infinity = expanded (all rows). A global default plus per-pid overrides:
- * `cycleAll` advances the default and drops overrides (re-syncs everything);
- * `cycleGroup` advances just one pid. `collapseFor` resolves the effective n. */
-export const COLLAPSE_STEPS = [0, 12, Infinity];
-export const COLLAPSE_LABELS = { 0: "collapsed", 12: "max 12", [Infinity]: "all" };
-export const collapse = signal({ global: 12, overrides: {} });
+/* Rows to show: 0 = collapsed (header only) or Infinity = expanded (all rows).
+ * A global default plus per-pid overrides: `cycleAll` toggles the default and
+ * drops overrides (re-syncs everything); `cycleGroup` toggles just one pid.
+ * `collapseFor` resolves the effective value. */
+export const COLLAPSE_STEPS = [Infinity, 0];
+export const COLLAPSE_LABELS = { 0: "collapsed", [Infinity]: "expanded" };
+export const collapse = signal({ global: Infinity, overrides: {} });
 export const collapseFor = (pid) => {
   const c = collapse.get();
   return pid in c.overrides ? c.overrides[pid] : c.global;
