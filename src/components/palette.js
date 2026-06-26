@@ -10,6 +10,7 @@ export const COL = {
 
   /* chrome */
   title: "#268bd2",
+  hover: "#1b2433", /* faint row highlight under the pointer (a hair above bg) */
   header: "#586e75", /* column-header labels        */
   dim: "#93a1a1",
   accent: "#b58900",

@@ -14,6 +14,7 @@ import Sparkline from "./sparkline.jsx";
 import { COL, roleColor } from "./palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
 import { tip, inspect } from "../controls.js";
+import { hoverTip, hoverBg } from "./hover.js";
 
 const roleTip = (c) =>
   c.role === "client"
@@ -29,11 +30,12 @@ export default function Row({ conn, now, span, geom, order, visible }) {
       order={order}
       height={() => (visible() ? 1 : 0)}
       overflow="hidden"
+      bg={hoverBg(conn.key)}
       onClick={(e) => {
         inspect(conn);
         e.stopPropagation();
       }}
-      {...tip(() => `connection #${conn.conn} · click to inspect its messages`)}
+      {...hoverTip(conn.key, () => `connection #${conn.conn} · click to inspect its messages`)}
     >
       <Box width={geom.left} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
         <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>

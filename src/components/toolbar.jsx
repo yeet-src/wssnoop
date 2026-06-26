@@ -12,6 +12,7 @@ import { Box, Text, face, computed, signal } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
+import { hoverTip, hoverBg } from "./hover.js";
 import { COL } from "./palette.js";
 import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
 import {
@@ -80,8 +81,9 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             pinned to one connection; click to release. */}
         <Box
           break="none"
+          bg={hoverBg("focuschip")}
           onClick={clearFocus}
-          {...tip("eBPF capture is focused on one connection (others silenced in-kernel) · click to release")}
+          {...hoverTip("focuschip", "eBPF capture is focused on one connection (others silenced in-kernel) · click to release")}
         >
           <Text break="none">
             {() => {

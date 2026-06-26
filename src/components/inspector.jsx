@@ -20,6 +20,7 @@
 import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
 
 import Button from "./button.jsx";
+import { hoverTip, hoverBg } from "./hover.js";
 import { COL, roleColor, jsonColor } from "./palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
@@ -164,11 +165,12 @@ export default function Inspector({ groups, now, size }) {
       direction="row"
       height={1}
       break="none"
+      bg={hoverBg(`msg:${rec.seq}`)}
       onClick={(e) => {
         toggle(rec.seq);
         e.stopPropagation();
       }}
-      {...tip(() => {
+      {...hoverTip(`msg:${rec.seq}`, () => {
         const badge = rec.inflateError
           ? " · ⚠ permessage-deflate inflate failed"
           : rec.compressed
