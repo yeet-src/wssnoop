@@ -30,7 +30,7 @@ export default function Row({ conn, now, span, width, order, visible }) {
       height={() => (visible() ? 1 : 0)}
       overflow="hidden"
       onClick={(e) => {
-        inspect(conn.key);
+        inspect(conn);
         e.stopPropagation();
       }}
       {...tip(() => `connection #${conn.conn} — click to inspect its messages`)}

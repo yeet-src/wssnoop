@@ -85,10 +85,13 @@ export const cycleGroup = (pid) =>
 
 /* ---- selection (the inspector drill-down) ---------------------------- */
 /* `selected` is the connection key (`${pid}:${ssl}`) being inspected, or null
- * when the overlay is closed. Clicking a row opens it; the scrim, the close
- * button, and Escape clear it. The inspector resolves the key against the live
- * registry each frame, so an evicted/closed connection is detectable. */
+ * when the overlay is closed. `selectedConn` holds the actual conn object, so
+ * the inspector can guard against SSL* reuse: OpenSSL recycles freed pointers,
+ * so a new connection can appear under the *same key* — identity (not key)
+ * tells "still the connection I opened" from "a different one reusing the
+ * pointer". Clicking a row opens it; the scrim / close button / Escape clear it. */
 export const selected = signal(null);
+export const selectedConn = signal(null);
 
 /* Inspector view-state. Module-level (not local to the Inspector component) on
  * purpose: the root body re-projects on every clock tick, which re-creates the
@@ -104,8 +107,9 @@ export const inspectRaw = signal(false); // show an expanded payload as raw hex 
 export const toggleDetails = () => inspectDetails.update((v) => !v);
 export const toggleRaw = () => inspectRaw.update((v) => !v);
 
-export const inspect = (key) => {
-  selected.set(key);
+export const inspect = (conn) => {
+  selected.set(conn.key);
+  selectedConn.set(conn);
   inspectFrozen.set(false);
   inspectScroll.set(0);
   inspectExpanded.set(null);
@@ -116,6 +120,7 @@ export const inspect = (key) => {
 };
 export const closeInspector = () => {
   selected.set(null);
+  selectedConn.set(null);
   clearSearch();
 };
 export const isInspecting = () => selected.get() != null;

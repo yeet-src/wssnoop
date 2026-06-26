@@ -26,6 +26,7 @@ import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import {
   selected,
+  selectedConn,
   closeInspector,
   tip,
   flash,
@@ -93,11 +94,16 @@ export default function Inspector({ groups, now, size }) {
    * still. "live" resumes the tail. */
 
   /* Resolve the selected key against the live registry; null = closed. */
+  /* Resolve the inspected connection — by identity, not just key. OpenSSL reuses
+   * freed SSL* pointers, so a different connection can appear under the same key;
+   * returning it would silently rebind the inspector to the wrong stream. We
+   * match the exact object we opened, so a reused key reads as "closed". */
   const lookup = () => {
+    const want = selectedConn.get();
     const key = selected.get();
     for (const g of groups.get()) {
       const c = g.conns.find((x) => x.key === key);
-      if (c) return c;
+      if (c) return c === want ? c : null;
     }
     return null;
   };
@@ -313,13 +319,18 @@ export default function Inspector({ groups, now, size }) {
             if (!c) return <Text break="anywhere">{fg(COL.dim)("It is no longer in the registry.")}</Text>;
             const n = now.get();
             const more = details.get();
-            const stat = c.status === "closed" ? fg(COL.warn) : fg(COL.ok);
+            const STATUS = {
+              open: [fg(COL.ok), "● open"],
+              closed: [fg(COL.warn), "✕ closed"],
+              truncated: [fg(COL.warn), "⚠ truncated"],
+            };
+            const [stat, statLabel] = STATUS[c.status] ?? STATUS.open;
             const ratio = c.wireBytes > 0 ? c.inflatedBytes / c.wireBytes : 0;
             const lines = [
               <Text break="anywhere">
                 {[
                   fg(COL.dim)("status "),
-                  stat(c.status === "closed" ? "✕ closed" : "● open"),
+                  stat(statLabel),
                   fg(COL.dim)(" · "),
                   fg(roleColor(c.role))(c.role),
                   fg(COL.dim)(` · ${c.dest}`),

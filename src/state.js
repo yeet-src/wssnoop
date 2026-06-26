@@ -302,7 +302,13 @@ export function createRegistry() {
       return;
     }
 
-    // truncated: keeps the conn alive (lastActiveAt bumped) but no byte signal.
+    /* A truncated chunk (an SSL call larger than the BPF capture cap) leaves an
+     * unparseable hole — the decoder abandons this stream. Mark the conn so the
+     * UI shows it stopped rather than a silently-frozen "open" row. */
+    if (rec.type === "truncated") {
+      c.status = "truncated";
+      c.closeReason = c.closeReason || "capture truncated (SSL call exceeded the 16 KB cap)";
+    }
   }
 
   /* Drop conns idle past retention, then enforce the hard caps. Returns nothing
@@ -352,7 +358,7 @@ export function createRegistry() {
    * everything. */
   const focusGone = (key) => {
     const c = conns.get(key);
-    return !c || c.status === "closed";
+    return !c || c.status === "closed" || c.status === "truncated";
   };
   return { ingest, evict, snapshot, focusGone };
 }
