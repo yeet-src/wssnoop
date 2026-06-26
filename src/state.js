@@ -36,7 +36,7 @@ import { computed, from, signal } from "yeet:tui";
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
-import { focusKey } from "./controls.js";
+import { focusKey, clearFocus } from "./controls.js";
 
 /* Idle eviction matches the max viz range — a conn silent longer than the
  * longest sparkline window can show carries no visible data, so drop it. */
@@ -347,7 +347,14 @@ export function createRegistry() {
     };
   }
 
-  return { ingest, evict, snapshot };
+  /* A focused connection is "gone" once it's absent or has sent/seen a CLOSE —
+   * at which point keeping the kernel filter on its dead SSL* would silence
+   * everything. */
+  const focusGone = (key) => {
+    const c = conns.get(key);
+    return !c || c.status === "closed";
+  };
+  return { ingest, evict, snapshot, focusGone };
 }
 
 export function createSession({ bin, pid, debug = false } = {}) {
@@ -391,8 +398,12 @@ export function createSession({ bin, pid, debug = false } = {}) {
     let lastMember = -1;
     const publish = () => {
       const now = Date.now();
-      syncFocus();
       reg.evict(now);
+      /* If the focused connection has closed/recycled/evicted, the kernel
+       * filter would silence *everything* — release focus so the table doesn't
+       * look frozen. */
+      if (focusKey.get() && reg.focusGone(focusKey.get())) clearFocus();
+      syncFocus();
       const snap = reg.snapshot();
       /* Republish the group structure only when membership changed; the clock
        * tick drives per-row content (sparklines, counts) off the live conn
