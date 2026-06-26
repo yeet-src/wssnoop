@@ -134,6 +134,27 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## Runtime / isolate
 
+### 22. `yeet.exit()` hangs if anything is still subscribed — it doesn't run cleanups **[silent]**
+- **Symptom:** Pressing `q` (calls `yeet.exit()`) leaves `yeet run` wedged — the
+  alt-screen restores but the shell prompt never returns; the process just sits
+  there. The `--testonly-exit-after-secs` path exits fine, the interactive quit
+  doesn't.
+- **Cause:** `yeet.exit()` does **not** unmount the view or run lifecycle
+  cleanups, so every still-live resource keeps the isolate alive: a `from()`
+  producer's teardown (our BPF ringbuf `unsubscribe()` + `control.stop()`), a
+  bare `setInterval`, an `Effect` teardown. With the heartbeat interval and the
+  BPF session still running, the isolate never goes idle and exit blocks. The
+  `--secs` path only worked because it happened to call the mount teardown first.
+- **Workaround:** Capture `mount()`'s returned teardown and call it *before*
+  `yeet.exit()` on every quit path (`q`, `Esc`-to-quit, timed exit). Unmounting
+  drops the watchers, which fires the `from()` cleanups, which release the tap.
+- **Why this is wrong / suggested fix:** A script shouldn't need an imperative
+  teardown at all — `from()`/`Effect` cleanups are *defined* to run when nothing
+  watches them, and process exit means nothing watches anything. `yeet.exit()`
+  should unmount the live tree (or otherwise run all registered cleanups) and
+  then force-exit after a short grace period regardless, so a stray timer can
+  never wedge the process. As-is, "exit" that doesn't exit is a footgun.
+
 ### 4. A hard V8-worker death is uncatchable and paints over the screen **[uncatchable]**
 - **Symptom:** TTY closes with no message after <1 min under load; daemon log
   shows `watchdog] V8 worker died. Respawning worker.` There is no JS exception.

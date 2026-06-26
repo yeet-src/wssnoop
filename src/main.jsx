@@ -59,6 +59,21 @@ function parseBool(v) {
   return s === "" || s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
+/* Quit cleanly: unmount FIRST so the tap's from() cleanup runs (clears the
+ * heartbeat interval, unsubscribes the ringbuf, stops the BPF session), THEN
+ * exit. Skipping teardown leaves those resources live and the isolate never
+ * goes idle, so `yeet run` hangs instead of returning to the prompt. `teardown`
+ * is assigned at mount below; the handler only fires after that. */
+let teardown;
+const quit = () => {
+  try {
+    teardown?.();
+  } catch {
+    /* tearing down on the way out — a teardown throw must not block exit */
+  }
+  yeet.exit();
+};
+
 tty.enableMouse(); /* hover tooltips + clickable controls */
 tty.on("keydown", (e) => {
   const key = e.key ?? "";
@@ -84,9 +99,9 @@ tty.on("keydown", (e) => {
   if (e.code === "Escape") {
     if (search.get()) return clearSearch();
     if (isInspecting()) return closeInspector();
-    return yeet.exit();
+    return quit();
   }
-  if (key.toLowerCase() === "q") return yeet.exit();
+  if (key.toLowerCase() === "q") return quit();
 
   /* Global-action shortcuts (sort/role/idle/rows/window) — the same actions the
    * toolbar buttons run, each discoverable via the button's mouseover. Gated to
@@ -101,19 +116,17 @@ tty.on("keydown", (e) => {
 /* The session is a bundle of signals; the BPF tap attaches when the view mounts
  * (the signals get watched) and detaches when it unmounts. */
 const session = createSession({ bin: BIN, pid: PID, debug: DEBUG });
-let teardown;
 try {
   teardown = mount((size) => <Root size={size} {...session} />);
 } catch (e) {
   teardown = mount(() => <Bsod error={e} />); // setup threw → show it, don't dump a stack
 }
 
-/* `--testonly-exit-after-secs N` runs for N seconds, then unmounts (tearing the
- * tap down) and exits; otherwise the mounted UI keeps the isolate alive until
+/* `--testonly-exit-after-secs N` runs for N seconds, then quits (tearing the tap
+ * down) and exits; otherwise the mounted UI keeps the isolate alive until
  * q / Ctrl-C. For the headless demo/test harness only. */
 if (SECS > 0) {
   await new Promise((r) => setTimeout(r, SECS * 1000));
-  teardown();
-  yeet.exit();
+  quit();
 }
 await new Promise(() => {}); // keep the script alive; the TUI owns the screen
