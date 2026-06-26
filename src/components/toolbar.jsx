@@ -69,7 +69,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             don't reliably keep their gap (a box around a dynamic thunk
             under-measures its right edge), so spacing is explicit inside one
             Text instead. */}
-        <Box break="none" {...tip("wssnoop · uprobe tap status · open WebSocket connections · messages decoded")}>
+        <Box break="none" bg={COL.bg} {...tip("wssnoop · uprobe tap status · open WebSocket connections · messages decoded")}>
           <Text break="none">
             {() => [
               face({ bold: true, fg: COL.title })("wssnoop  "),
@@ -81,7 +81,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             pinned to one connection; click to release. */}
         <Box
           break="none"
-          bg={hoverBg("focuschip")}
+          bg={hoverBg("focuschip", COL.bg)}
           onClick={clearFocus}
           {...hoverTip("focuschip", "eBPF capture is focused on one connection (others silenced in-kernel) · click to release")}
         >
@@ -96,30 +96,35 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           </Text>
         </Box>
         <Box width="1fr" />
-        <Button
-          title={titles.search}
-          onClick={startSearch}
-          active={() => searchActive.get() || !!search.get()}
-        >
-          {() => (search.get() ? `⌕ ${search.get()}` : "⌕ search")}
-        </Button>
-        <Button title={titles.sort} onClick={cycleSort}>
-          {() => `sort:${SORT_LABELS[sortKey.get()]}`}
-        </Button>
-        <Button title={titles.role} onClick={cycleRole}>
-          {() => `role:${filters.get().role}`}
-        </Button>
-        <Button title={titles.active} onClick={toggleActive} active={() => filters.get().activeOnly}>
-          {() => `idle:${filters.get().activeOnly ? "hidden" : "shown"}`}
-        </Button>
-        <Button title={titles.rows} onClick={cycleAll}>
-          {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
-        </Button>
-        <Button title={titles.vizDown} onClick={() => cycleViz(-1)}>‹</Button>
-        <Text break="none">
-          {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
-        </Text>
-        <Button title={titles.vizUp} onClick={() => cycleViz(1)}>›</Button>
+        {/* the controls ride in one opaque cluster (bg + its own gaps), so a
+            too-narrow row slides it left to clip the title cleanly rather than
+            letting the title bleed up through the gaps between buttons. */}
+        <Box direction="row" gap={1} bg={COL.bg} break="none">
+          <Button
+            title={titles.search}
+            onClick={startSearch}
+            active={() => searchActive.get() || !!search.get()}
+          >
+            {() => (search.get() ? `⌕ ${search.get()}` : "⌕ search")}
+          </Button>
+          <Button title={titles.sort} onClick={cycleSort}>
+            {() => `sort:${SORT_LABELS[sortKey.get()]}`}
+          </Button>
+          <Button title={titles.role} onClick={cycleRole}>
+            {() => `role:${filters.get().role}`}
+          </Button>
+          <Button title={titles.active} onClick={toggleActive} active={() => filters.get().activeOnly}>
+            {() => `idle:${filters.get().activeOnly ? "hidden" : "shown"}`}
+          </Button>
+          <Button title={titles.rows} onClick={cycleAll}>
+            {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
+          </Button>
+          <Button title={titles.vizDown} onClick={() => cycleViz(-1)}>‹</Button>
+          <Text break="none">
+            {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
+          </Text>
+          <Button title={titles.vizUp} onClick={() => cycleViz(1)}>›</Button>
+        </Box>
       </Box>
 
       {/* strip 2 — global aggregate bar */}
