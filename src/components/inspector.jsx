@@ -64,8 +64,9 @@ const MAX_LINES = 400; /* cap an expanded payload so a huge frame can't run away
 
 /* Panel takes most of the width — JSON is wide — but never the whole screen nor
  * less than a readable minimum; on a narrow terminal it's nearly full-screen.
- * The cap leaves room for the float's margin and the 1-cell drop-shadow. */
-const panelW = (cols) => Math.max(40, Math.min(cols - 6, Math.round(cols * 0.72)));
+ * It docks flush to the right edge, so the only inset is for a little air on the
+ * left where the table stays visible. */
+const panelW = (cols) => Math.max(40, Math.min(cols - 4, Math.round(cols * 0.72)));
 
 const ageOf = (now, at) => `${fmtAgo(now - at)}`.padStart(4);
 const arrow = (dir) => (dir === DIR_WRITE ? fg(COL.out)("↑") : fg(COL.in)("↓"));
@@ -84,6 +85,16 @@ function preview(rec) {
 }
 
 const oneLine = (s) => (s == null ? "" : s.replace(/\s+/g, " ").trim());
+
+/* An inline indicator that explains itself: it renders its glyph/label and
+ * carries a tip(), so hovering *that one widget* puts its meaning in the
+ * minibuffer. This is how a line gets one tip per meaningful symbol instead of
+ * a single catch-all tip on the whole row. Height-1 so a row of them aligns. */
+const Tag = (title, ...content) => (
+  <Box direction="row" height={1} break="none" {...tip(title)}>
+    <Text break="none">{content}</Text>
+  </Box>
+);
 
 export default function Inspector({ groups, now, size }) {
   let count = 0; /* messages last rendered — clamps the wheel */
@@ -198,19 +209,47 @@ export default function Inspector({ groups, now, size }) {
   );
 
   /* Frame-health line above an expanded payload: size + per-message compression,
-   * fragmentation, masking correctness (client egress must be masked, server
-   * ingress must not), and any close code/reason. */
+   * fragmentation, masking correctness, and any close code/reason — each its own
+   * hoverable indicator (a row of Tags), so every glyph explains itself. */
   const healthLine = (rec) => {
-    const out = [fg(COL.dim)(`${rec.name} · ${fmtBytes(rec.len)}`)];
+    const out = [
+      Tag(
+        `frame · opcode "${rec.name}", ${fmtBytes(rec.len)} decoded`,
+        fg(COL.dim)(`${rec.name} · ${fmtBytes(rec.len)}`),
+      ),
+    ];
     if (rec.compressed && rec.wireLen > 0) {
       const ratio = rec.len / rec.wireLen;
-      out.push(fg(COL.in)(` ⚙ wire ${fmtBytes(rec.wireLen)} · ${ratio.toFixed(1)}×`));
+      out.push(
+        Tag(
+          `⚙ permessage-deflate · this frame arrived compressed; ${fmtBytes(rec.wireLen)} on the wire inflated to ${fmtBytes(rec.len)} (${ratio.toFixed(1)}×)`,
+          fg(COL.in)(` ⚙ wire ${fmtBytes(rec.wireLen)} · ${ratio.toFixed(1)}×`),
+        ),
+      );
     }
-    if (rec.frames > 1) out.push(fg(COL.dim)(` · ${rec.frames} frames`));
+    if (rec.frames > 1)
+      out.push(
+        Tag(
+          `fragmentation · this message was reassembled from ${rec.frames} WebSocket frames`,
+          fg(COL.dim)(` · ${rec.frames} frames`),
+        ),
+      );
     const maskOk = rec.dir === DIR_WRITE ? rec.masked : !rec.masked;
-    out.push(maskOk ? fg(COL.dim)(" · mask ✓") : fg(COL.warn)(" · mask ✗"));
+    out.push(
+      Tag(
+        maskOk
+          ? "mask ✓ · RFC-6455 masking is correct (client→server frames must be masked, server→client must not be)"
+          : "mask ✗ · RFC-6455 masking is wrong for this direction; client→server frames must be masked and server→client must not be, so a violation here means a broken/misbehaving peer",
+        maskOk ? fg(COL.dim)(" · mask ✓") : fg(COL.warn)(" · mask ✗"),
+      ),
+    );
     if (rec.closeCode != null)
-      out.push(fg(COL.warn)(` · close ${rec.closeCode}${rec.closeReason ? ` "${rec.closeReason}"` : ""}`));
+      out.push(
+        Tag(
+          `close · this is a CLOSE frame; code ${rec.closeCode}${rec.closeReason ? `, reason "${rec.closeReason}"` : ""}`,
+          fg(COL.warn)(` · close ${rec.closeCode}${rec.closeReason ? ` "${rec.closeReason}"` : ""}`),
+        ),
+      );
     return out;
   };
 
@@ -248,7 +287,7 @@ export default function Inspector({ groups, now, size }) {
     const shown = lines.slice(0, MAX_LINES);
     return (
       <Box direction="column" height="fit" padding={[0, 0, 1, 3]}>
-        <Text break="none">{healthLine(rec)}</Text>
+        <Box direction="row" height={1} break="none">{healthLine(rec)}</Box>
         {warn ? <Text break="anywhere">{fg(COL.warn)(warn)}</Text> : null}
         {shown.map((l) =>
           kind === "json" ? (
@@ -276,25 +315,18 @@ export default function Inspector({ groups, now, size }) {
         {...tip("inspector · click here or press Esc to close")}
       />
 
-      {/* the floating panel + its drop-shadow. The wrapper carries a border on
-          just the right & bottom sides, drawn with the ▒ shade glyph — a classic
-          box-shadow. Its border-box insets the real panel by that 1 cell, so the
-          shadow falls outside the rounded frame (│▒ on the right, ▒ below). */}
+      {/* the panel — a drawer docked flush to the right edge. No surrounding
+          frame: it spans the full height against the right side and carries a
+          border on just its LEFT side (the seam where it meets the table), so it
+          reads as protruding from the edge rather than floating over it. */}
       <Box
-        width={() => panelW(size.get().cols) + 1}
-        right={1}
-        top={1}
-        bottom={1}
+        width={() => panelW(size.get().cols)}
+        right={0}
+        top={0}
+        bottom={0}
         z={1}
-        border={{ line: "▒▒▒▒▒▒", sides: ["right", "bottom"], fg: COL.shadow }}
-        direction="column"
-        overflow="visible"
-      >
-       <Box
-        width="1fr"
-        height="1fr"
         bg={COL.panel}
-        border={{ line: "round", fg: COL.accent }}
+        border={{ line: "round", sides: ["left"], fg: COL.accent }}
         padding={[0, 1]}
         direction="column"
         overflow="hidden"
@@ -345,12 +377,7 @@ export default function Inspector({ groups, now, size }) {
 
         {/* detail lines — two compact always-on lines plus an expandable block
             ("details") that surfaces every negotiated/lifecycle dimension. */}
-        <Box
-          direction="column"
-          height="fit"
-          break="none"
-          {...tip("connection summary · ↑/↓ are message counts then byte totals; ⚙ N× is the permessage-deflate compression ratio (decoded ÷ on-wire); ✂ marks a truncated capture")}
-        >
+        <Box direction="column" height="fit" break="none">
           {() => {
             const c = lookup();
             if (!c) return <Text break="anywhere">{fg(COL.dim)("It is no longer in the registry.")}</Text>;
@@ -366,29 +393,55 @@ export default function Inspector({ groups, now, size }) {
             const [stat, statLabel] = STATUS[c.status] ?? STATUS.open;
             const ratio = c.wireBytes > 0 ? c.inflatedBytes / c.wireBytes : 0;
             const lines = [
-              <Text break="anywhere">
-                {[
+              /* line 1: lifecycle + role + destination, each self-explaining */
+              <Box direction="row" height={1} break="none">
+                {Tag(
+                  "status · the connection's lifecycle · ● open while the socket is live, ✕ closed once it has ended",
                   fg(COL.dim)("status "),
                   stat(statLabel),
-                  c.truncated ? fg(COL.snip)(" · ✂ truncated") : "",
+                )}
+                {c.truncated
+                  ? Tag(
+                      "✂ truncated · a capture hit the 4 KB per-SSL-call cap, so some payloads are cut off; the live stream itself is unaffected",
+                      fg(COL.snip)(" · ✂ truncated"),
+                    )
+                  : null}
+                {Tag(
+                  `role · ${c.role}, inferred from the handshake direction (client = we dialed out, server = inbound)`,
                   fg(COL.dim)(" · "),
                   fg(roleColor(c.role))(c.role),
-                  fg(COL.dim)(` · ${c.dest}`),
-                ]}
-              </Text>,
-              <Text break="none">
-                {[
-                  fg(COL.dim)(`opened ${fmtAgo(n - c.startedAt)} · `),
+                )}
+                <Box direction="row" width="1fr" height={1} break="none" {...tip("destination · the wss:// URL this connection is talking to")}>
+                  <Text break="none" overflow="ellipsis">{[fg(COL.dim)(" · "), fg(COL.dim)(c.dest)]}</Text>
+                </Box>
+              </Box>,
+              /* line 2: age + message counts + byte totals + compression ratio */
+              <Box direction="row" height={1} break="none">
+                {Tag(
+                  "how long ago this connection's handshake completed",
+                  fg(COL.dim)(`opened ${fmtAgo(n - c.startedAt)}`),
+                )}
+                {Tag(
+                  "messages sent (↑) and received (↓) on this connection",
+                  fg(COL.dim)(" · "),
                   fg(COL.out)(`${c.msgUp}↑`),
                   fg(COL.dim)(" "),
                   fg(COL.in)(`${c.msgDn}↓`),
+                )}
+                {Tag(
+                  "total bytes sent / received, decoded (after permessage-deflate inflate)",
                   fg(COL.dim)(" · "),
                   fg(COL.out)(fmtBytes(c.hist.totalUp)),
                   fg(COL.dim)(" / "),
                   fg(COL.in)(fmtBytes(c.hist.totalDown)),
-                  ratio ? fg(COL.in)(` · ⚙ ${ratio.toFixed(1)}×`) : "",
-                ]}
-              </Text>,
+                )}
+                {ratio
+                  ? Tag(
+                      "⚙ permessage-deflate compression ratio · decoded bytes ÷ on-wire bytes, averaged over the connection",
+                      fg(COL.in)(` · ⚙ ${ratio.toFixed(1)}×`),
+                    )
+                  : null}
+              </Box>,
             ];
             if (more) {
               const row = (k, v) => (
@@ -463,51 +516,57 @@ export default function Inspector({ groups, now, size }) {
 
         <Text break="none">{fg(COL.header)(RULE)}</Text>
 
-        {/* the message log + its scrollbar */}
-        <Box direction="row" height="1fr" overflow="hidden" onWheel={onWheel}>
-          <Box width="1fr" height="1fr" overflow="hidden">
+        {/* the message log with an OVERLAY scrollbar: the log fills the full
+            width and the scrollbar floats over its right edge (a z-stacked Layer
+            child) rather than reserving a column, so nothing reflows when it
+            appears/disappears. */}
+        <Box height="1fr" overflow="hidden" onWheel={onWheel}>
+          <Layer height="1fr">
+            <Box width="1fr" height="1fr" overflow="hidden">
+              {() => {
+                const c = lookup();
+                if (!c) return <Text break="none">{fg(COL.dim)("  ·")}</Text>;
+                now.get(); /* refresh the tail each heartbeat while following live */
+                raw.get(); /* re-render the expanded payload when raw/decoded flips */
+                const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
+                count = all.length;
+                if (count === 0) {
+                  const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
+                  return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
+                }
+                const top = Math.max(0, Math.min(scroll.get(), count - 1));
+                const open = expanded.get();
+                /* Flat list: preview rows are direct children; an expanded payload
+                   follows its row as a sibling (not nested) so each clickable row
+                   keeps a definite-height parent. */
+                return all.slice(top, top + viewH()).flatMap((rec) =>
+                  rec.seq === open ? [previewRow(rec), Payload(rec)] : [previewRow(rec)],
+                );
+              }}
+            </Box>
             {() => {
-              const c = lookup();
-              if (!c) return <Text break="none">{fg(COL.dim)("  ·")}</Text>;
-              now.get(); /* refresh the tail each heartbeat while following live */
-              raw.get(); /* re-render the expanded payload when raw/decoded flips */
-              const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
-              count = all.length;
-              if (count === 0) {
-                const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
-                return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
-              }
-              const top = Math.max(0, Math.min(scroll.get(), count - 1));
-              const open = expanded.get();
-              /* Flat list: preview rows are direct children; an expanded payload
-                 follows its row as a sibling (not nested) so each clickable row
-                 keeps a definite-height parent. */
-              return all.slice(top, top + viewH()).flatMap((rec) =>
-                rec.seq === open ? [previewRow(rec), Payload(rec)] : [previewRow(rec)],
+              /* A proportional scrollbar floating on the right edge: thumb size =
+                 window/total, position = scroll/maxScroll. Absent when it all
+                 fits. Its glyphs draw over the log's last column (overlay style). */
+              if (!lookup()) return null;
+              now.get();
+              const n = currentMsgs().length;
+              const h = viewH();
+              if (n <= h) return null;
+              const thumb = Math.max(1, Math.round((h / n) * h));
+              const top = Math.max(0, Math.min(scroll.get(), n - 1));
+              const pos = Math.min(h - thumb, Math.round((top / Math.max(1, n - h)) * (h - thumb)));
+              return (
+                <Box right={0} top={0} width={1} z={1} direction="column" break="none">
+                  {Array.from({ length: h }, (_, i) => (
+                    <Text height={1} break="none">
+                      {i >= pos && i < pos + thumb ? fg(COL.accent)("█") : fg(COL.header)("░")}
+                    </Text>
+                  ))}
+                </Box>
               );
             }}
-          </Box>
-          {() => {
-            /* A proportional scrollbar: thumb size = window/total, position =
-               scroll/maxScroll. Hidden (zero-width) when everything fits. */
-            if (!lookup()) return null;
-            now.get();
-            const n = currentMsgs().length;
-            const h = viewH();
-            if (n <= h) return null;
-            const thumb = Math.max(1, Math.round((h / n) * h));
-            const top = Math.max(0, Math.min(scroll.get(), n - 1));
-            const pos = Math.min(h - thumb, Math.round((top / Math.max(1, n - h)) * (h - thumb)));
-            return (
-              <Box width={1} direction="column" break="none">
-                {Array.from({ length: h }, (_, i) => (
-                  <Text height={1} break="none">
-                    {i >= pos && i < pos + thumb ? fg(COL.accent)("█") : fg(COL.header)("░")}
-                  </Text>
-                ))}
-              </Box>
-            );
-          }}
+          </Layer>
         </Box>
 
         {/* footer hint */}
@@ -522,7 +581,6 @@ export default function Inspector({ groups, now, size }) {
             )
           }
         </Text>
-       </Box>
       </Box>
     </Layer>
   );

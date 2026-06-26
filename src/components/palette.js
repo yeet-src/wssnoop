@@ -28,7 +28,6 @@ export const COL = {
   /* inspector overlay */
   scrim: "#05080dcc", /* translucent wash dimming the list behind the panel */
   panel: "#11161f", /* the panel's opaque surface (a hair above bg)        */
-  shadow: "#010409", /* the ▒ drop-shadow cast on the panel's right/bottom  */
   warn: "#dc322f", /* inflate failure / error badge                       */
   snip: "#b58900", /* capture truncated — a calm caution, not an error     */
   ok: "#859900", /* healthy / open status                                */
