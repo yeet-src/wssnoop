@@ -2,7 +2,7 @@
  * tooltip. Reads `hoverTitle` in a thunk so it repaints as the pointer moves
  * across the toolbar; falls back to a static hint when nothing is hovered. */
 
-import { Box, Text, italic, fg } from "yeet:tui";
+import { Box, Text, face } from "yeet:tui";
 
 import { hoverTitle, toast } from "../controls.js";
 import { COL } from "./palette.js";
@@ -15,12 +15,14 @@ export default function Minibuffer() {
     <Box height={1} overflow="hidden">
       <Text break="none">
         {/* toast (transient) wins over the hover tooltip, which wins over the
-            static hint. Explicit fg — a bare dim() vanishes on the dark surface. */}
+            static hint. The tooltip is stored unresolved (string | thunk) so a
+            state-naming title stays live while hovered — resolve it here. */}
         {() => {
           const flash = toast.get();
-          if (flash) return fg(COL.accent)(flash);
+          if (flash) return face({ fg: COL.accent })(flash);
           const t = hoverTitle.get();
-          return t ? fg(COL.dim)(t) : italic(fg(COL.header)(HINT));
+          const text = typeof t === "function" ? t() : t;
+          return text ? face({ fg: COL.dim })(text) : face({ fg: COL.header, italic: true })(HINT);
         }}
       </Text>
     </Box>

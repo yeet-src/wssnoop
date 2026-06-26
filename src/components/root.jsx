@@ -9,7 +9,7 @@
  *   toolbar (global bar + headers)  ·  grouped table (1fr)  ·  minibuffer
  */
 
-import { Box, Text, Layer, fg, computed } from "yeet:tui";
+import { Box, Text, Layer, computed } from "yeet:tui";
 
 import Toolbar from "./toolbar.jsx";
 import Group from "./group.jsx";
@@ -56,16 +56,12 @@ export default function Root({ size, groups, global, stats, status, clock }) {
           }
 
           if (view.length === 0) {
-            if (q) return <Text break="none">{fg(COL.dim)(`  no connections match “${q}”`)}</Text>;
+            if (q) return <Text break="none" fg={COL.dim}>{`  no connections match “${q}”`}</Text>;
             /* Reassure during the opening dead air: the tap is live, just no
              * handshake yet. Show the probe status so a failed attach is plain. */
             return (
-              <Text break="anywhere">
-                {() =>
-                  fg(COL.dim)(
-                    `  ${status.get()} — waiting for the first WebSocket handshake…  (try ./demo/run.sh --attach)`,
-                  )
-                }
+              <Text break="anywhere" fg={COL.dim}>
+                {() => `  ${status.get()} — waiting for the first WebSocket handshake…  (try ./demo/run.sh --attach)`}
               </Text>
             );
           }

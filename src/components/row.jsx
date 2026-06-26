@@ -8,7 +8,7 @@
  * group: re-ranking re-flows the layout order and hiding collapses the row to height
  * 0, neither rebuilding the row. Widths come from columns.js so rows align. */
 
-import { Box, Text, fg } from "yeet:tui";
+import { Box, Text, face } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
 import { COL, roleColor } from "./palette.js";
@@ -37,10 +37,11 @@ export default function Row({ conn, now, span, width, order, visible }) {
     >
       <Box width={LEFT} direction="row" gap={GAP} padding={[0, 0, 0, INDENT]} break="none">
         <Box width={W_ROLE} overflow="hidden" break="none" {...tip(() => roleTip(conn))}>
-          <Text>{() => (now.get(), fg(roleColor(conn.role))(conn.role))}</Text>
+          {/* role colour is per-value, so a runtime face() patch, not a static attr */}
+          <Text>{() => (now.get(), face({ fg: roleColor(conn.role) })(conn.role))}</Text>
         </Box>
         <Box width={W_DEST} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
-          <Text>{() => (now.get(), fg(COL.dim)(conn.dest))}</Text>
+          <Text fg={COL.dim}>{() => (now.get(), conn.dest)}</Text>
         </Box>
         <Box
           width={W_MSG}
@@ -48,7 +49,7 @@ export default function Row({ conn, now, span, width, order, visible }) {
           {...tip(() => `messages: ${conn.msgUp} sent (↑) · ${conn.msgDn} received (↓)`)}
         >
           <Text break="none">
-            {() => (now.get(), [fg(COL.out)(`${conn.msgUp}↑`), " ", fg(COL.in)(`${conn.msgDn}↓`)])}
+            {() => (now.get(), [face({ fg: COL.out })(`${conn.msgUp}↑`), " ", face({ fg: COL.in })(`${conn.msgDn}↓`)])}
           </Text>
         </Box>
       </Box>
