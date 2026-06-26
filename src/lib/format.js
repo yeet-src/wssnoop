@@ -25,11 +25,6 @@ export function fmtBytes(n) {
   return (i === 0 ? Math.round(n) : n.toFixed(1)) + u[i];
 }
 
-/* bytes/sec -> "4.2K/s" (reuses the byte ramp, then appends /s). */
-export function fmtRate(bytesPerSec) {
-  return `${fmtBytes(bytesPerSec)}/s`;
-}
-
 /* elapsed ms -> "now" / "3s" / "2m" / "1h". */
 export function fmtAgo(ms) {
   const s = Math.floor(ms / 1000);

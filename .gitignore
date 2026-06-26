@@ -10,3 +10,4 @@
 
 # kernel-matrix run output (build/kernel-matrix.sh)
 /.kmatrix/
+.demo-shots/
