@@ -19,6 +19,7 @@ import {
   sortKey, SORT_LABELS, cycleSort,
   filters, cycleRole, toggleActive,
   collapse, COLLAPSE_LABELS, cycleAll,
+  search, searchActive, startSearch,
   tip,
 } from "../controls.js";
 
@@ -37,6 +38,13 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           </Text>
         </Box>
         <Box width="1fr" />
+        <Button
+          title="search (/) — filters messages while inspecting, connections otherwise"
+          onClick={startSearch}
+          active={() => searchActive.get() || !!search.get()}
+        >
+          {() => (search.get() ? `⌕ ${search.get()}` : "⌕ search")}
+        </Button>
         <Button title="sort connections and groups" onClick={cycleSort}>
           {() => `sort:${SORT_LABELS[sortKey.get()]}`}
         </Button>

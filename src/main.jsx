@@ -25,7 +25,17 @@ import { mount } from "yeet:tui";
 
 import Root from "./components/root.jsx";
 import { createSession } from "./state.js";
-import { isInspecting, closeInspector } from "./controls.js";
+import {
+  isInspecting,
+  closeInspector,
+  search,
+  searchActive,
+  startSearch,
+  stopSearch,
+  clearSearch,
+  typeSearch,
+  backspaceSearch,
+} from "./controls.js";
 
 const args = (typeof yeet !== "undefined" && yeet.args) || {};
 
@@ -43,9 +53,32 @@ function parseBool(v) {
 
 tty.enableMouse(); /* hover tooltips + clickable controls */
 tty.on("keydown", (e) => {
-  /* Escape backs out of the inspector first; only quits when nothing's open. */
-  if (e.code === "Escape" && isInspecting()) return closeInspector();
-  if (e.code === "Escape" || (e.key ?? "").toLowerCase() === "q") yeet.exit();
+  const key = e.key ?? "";
+
+  /* Search text-entry mode: keys feed the query box, not commands. */
+  if (searchActive.get()) {
+    if (e.code === "Escape") return clearSearch(); // cancel + clear the filter
+    if (e.code === "Enter") return stopSearch(); // confirm; query stays a live filter
+    if (e.code === "Backspace") return backspaceSearch();
+    if (key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault?.();
+      return typeSearch(key);
+    }
+    return;
+  }
+
+  /* Command mode. Esc progressively backs out: clear filter → close inspector
+   * → quit. "/" opens search. q quits. */
+  if (key === "/") {
+    e.preventDefault?.();
+    return startSearch();
+  }
+  if (e.code === "Escape") {
+    if (search.get()) return clearSearch();
+    if (isInspecting()) return closeInspector();
+    return yeet.exit();
+  }
+  if (key.toLowerCase() === "q") yeet.exit();
 });
 
 /* The session is a bundle of signals; the BPF tap attaches when the view mounts

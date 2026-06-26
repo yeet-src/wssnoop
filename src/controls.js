@@ -42,6 +42,25 @@ export const ROLES = ["all", "client", "server"];
 export const cycleRole = () => filters.update((f) => ({ ...f, role: wrap(ROLES, f.role) }));
 export const toggleActive = () => filters.update((f) => ({ ...f, activeOnly: !f.activeOnly }));
 
+/* ---- search (free-text) ---------------------------------------------- */
+/* One query box, context-sensitive: it filters the message log while the
+ * inspector is open, and the connection table otherwise. `active` is whether
+ * we're capturing keystrokes into it (main.jsx routes keydowns); the query
+ * persists as a live filter after you stop typing (Enter), and clears on Esc.
+ * `matches(text)` is the shared case-insensitive test. */
+export const search = signal("");
+export const searchActive = signal(false);
+export const startSearch = () => searchActive.set(true);
+export const stopSearch = () => searchActive.set(false); // confirm: keep the query
+export const clearSearch = () => {
+  search.set("");
+  searchActive.set(false);
+};
+export const typeSearch = (ch) => search.update((s) => s + ch);
+export const backspaceSearch = () => search.update((s) => s.slice(0, -1));
+export const matches = (text, q = search.get()) =>
+  !q || (text != null && String(text).toLowerCase().includes(q.toLowerCase()));
+
 /* ---- collapse (rows shown per process group) ------------------------- */
 /* n connections to show: 0 = collapsed (header only), 12 = default,
  * Infinity = expanded (all rows). A global default plus per-pid overrides:
@@ -85,8 +104,12 @@ export const inspect = (key) => {
   inspectScroll.set(0);
   inspectExpanded.set(null);
   inspectSnap.set([]);
+  clearSearch(); /* the query is context-scoped (messages vs connections) */
 };
-export const closeInspector = () => selected.set(null);
+export const closeInspector = () => {
+  selected.set(null);
+  clearSearch();
+};
 export const isInspecting = () => selected.get() != null;
 
 export const hoverTitle = signal(""); // current tooltip, shown in the minibuffer

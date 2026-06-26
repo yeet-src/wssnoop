@@ -15,10 +15,12 @@ import Toolbar from "./toolbar.jsx";
 import Group from "./group.jsx";
 import Inspector from "./inspector.jsx";
 import Minibuffer from "./minibuffer.jsx";
+import SearchBar from "./searchbar.jsx";
 import { COL } from "./palette.js";
 import { sparkWidth } from "./columns.js";
-import { vizRange, sortKey, filters, selected } from "../controls.js";
+import { vizRange, sortKey, filters, selected, search, matches, isInspecting } from "../controls.js";
 import { groupMetric, rankMap } from "../lib/rank.js";
+import { procInfo } from "../probes/procinfo.js";
 
 export default function Root({ size, groups, global, stats, status, clock }) {
   return (
@@ -34,13 +36,28 @@ export default function Root({ size, groups, global, stats, status, clock }) {
            * the group instead. */
           const role = filters.get().role;
           const width = sparkWidth(size.get().cols);
-          const view = groups
+          /* Free-text targets messages while the inspector is open, so it only
+           * narrows the table when the inspector is closed. */
+          const q = isInspecting() ? "" : search.get();
+          const info = procInfo.get();
+          let view = groups
             .get()
             .map((g) => ({ g, conns: role === "all" ? g.conns : g.conns.filter((c) => c.role === role) }))
             .filter(({ conns }) => conns.length > 0);
 
+          if (q) {
+            view = view
+              .map(({ g, conns }) =>
+                matches(info[g.pid]?.label ?? "", q) // whole process matches → keep all its conns
+                  ? { g, conns }
+                  : { g, conns: conns.filter((c) => matches(`${c.role} ${c.dest}`, q)) },
+              )
+              .filter(({ conns }) => conns.length > 0);
+          }
+
           if (view.length === 0) {
-            return <Text break="none">{fg(COL.dim)("  waiting for WebSocket traffic…")}</Text>;
+            const msg = q ? `  no connections match “${q}”` : "  waiting for WebSocket traffic…";
+            return <Text break="none">{fg(COL.dim)(msg)}</Text>;
           }
 
           const groupRank = computed(() => {
@@ -65,6 +82,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
         {() => (selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null)}
        </Layer>
       </Box>
+      <SearchBar />
       <Minibuffer />
     </Box>
   );

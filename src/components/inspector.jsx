@@ -29,11 +29,17 @@ import {
   closeInspector,
   tip,
   flash,
+  search,
+  matches,
   inspectScroll as scroll,
   inspectExpanded as expanded,
   inspectFrozen as frozen,
   inspectSnap as snap,
 } from "../controls.js";
+
+/* Everything a free-text query tests a message against. */
+const searchable = (rec) =>
+  `${rec.name} ${rec.text ?? (rec.json !== undefined ? JSON.stringify(rec.json) : "")}${rec.inflateError ?? ""}`;
 
 /* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */
 const copy = (text, note) => {
@@ -135,8 +141,14 @@ export default function Inspector({ groups, now, size }) {
     expanded.set(expanded.get() === seq ? null : seq);
   };
 
-  /* The message set the user currently sees (frozen snapshot, or live tail). */
-  const currentMsgs = () => (frozen.get() ? snap.get() : liveList());
+  /* The message set the user currently sees: frozen snapshot or live tail,
+   * narrowed by the free-text query. Drives both the list and copy/export, so
+   * "filter then copy" exports exactly the matching subset. */
+  const currentMsgs = () => {
+    const base = frozen.get() ? snap.get() : liveList();
+    const q = search.get();
+    return q ? base.filter((r) => matches(searchable(r), q)) : base;
+  };
   const copyAll = () => {
     const m = currentMsgs();
     if (!m.length) return flash("no messages to copy");
@@ -299,13 +311,14 @@ export default function Inspector({ groups, now, size }) {
           {() => {
             const c = lookup();
             if (!c) return <Text break="none">{fg(COL.dim)("  —")}</Text>;
-            /* frozen: the snapshot taken when we paused (stable to read);
-               live: the rolling tail, newest first. */
             now.get(); /* refresh the tail each heartbeat while following live */
-            const all = frozen.get() ? snap.get() : c.msgs.recent();
+            const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
             count = all.length;
-            if (count === 0) return <Text break="none">{italic(fg(COL.header)("  waiting for messages…"))}</Text>;
-            const rows = Math.max(4, size.get().rows - 14);
+            if (count === 0) {
+              const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
+              return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
+            }
+            const rows = Math.max(4, size.get().rows - 15);
             const top = Math.max(0, Math.min(scroll.get(), count - 1));
             const open = expanded.get();
             /* Flat list: preview rows are direct children; an expanded payload
