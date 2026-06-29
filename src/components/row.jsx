@@ -11,6 +11,7 @@
 import { Box, Text, face } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
+import Pair from "./pair.jsx";
 import { COL, roleColor } from "./palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
 import { tip, inspect } from "../controls.js";
@@ -48,14 +49,13 @@ export default function Row({ conn, now, span, geom, order, visible, depth = 0 }
         <Box width={geom.dest} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
           <Text fg={COL.dim}>{() => (now.get(), conn.dest)}</Text>
         </Box>
-        <Box
-          width={W_MSG}
-          overflow="hidden"
-          {...tip(() => `messages: ${conn.msgUp} sent (↑) · ${conn.msgDn} received (↓)`)}
-        >
-          <Text break="none">
-            {() => (now.get(), [face({ fg: COL.out })(`${conn.msgUp}↑`), " ", face({ fg: COL.in })(`${conn.msgDn}↓`)])}
-          </Text>
+        <Box width={W_MSG} overflow="hidden">
+          <Pair
+            keyId={conn.key}
+            sep=" "
+            up={{ color: COL.out, title: "messages sent (↑) on this connection", text: () => (now.get(), `${conn.msgUp}↑`) }}
+            down={{ color: COL.in, title: "messages received (↓) on this connection", text: () => (now.get(), `${conn.msgDn}↓`) }}
+          />
         </Box>
       </Box>
       <Box width={HANDLE} break="none" />

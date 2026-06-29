@@ -18,8 +18,10 @@
  * resets them when a new connection is opened. */
 
 import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
+import { pipe } from "yeet:helpers";
 
 import Button from "./button.jsx";
+import Pair from "./pair.jsx";
 import { hoverTip, hoverBg } from "./hover.js";
 import { COL, roleColor, jsonColor } from "./palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
@@ -455,20 +457,20 @@ export default function Inspector({ groups, now, size }) {
                   "how long ago this connection's handshake completed",
                   fg(COL.dim)(`opened ${fmtAgo(n - c.startedAt)}`),
                 )}
-                {Tag(
-                  "messages sent (↑) and received (↓) on this connection",
-                  fg(COL.dim)(" · "),
-                  fg(COL.out)(`${c.msgUp}↑`),
-                  fg(COL.dim)(" "),
-                  fg(COL.in)(`${c.msgDn}↓`),
-                )}
-                {Tag(
-                  "total bytes sent / received, decoded (after permessage-deflate inflate)",
-                  fg(COL.dim)(" · "),
-                  fg(COL.out)(fmtBytes(c.hist.totalUp)),
-                  fg(COL.dim)(" / "),
-                  fg(COL.in)(fmtBytes(c.hist.totalDown)),
-                )}
+                <Pair
+                  keyId="insp:msg"
+                  lead={pipe(" · ", fg(COL.dim))}
+                  sep={pipe(" ", fg(COL.dim))}
+                  up={{ color: COL.out, title: "messages sent (↑) on this connection", text: () => `${c.msgUp}↑` }}
+                  down={{ color: COL.in, title: "messages received (↓) on this connection", text: () => `${c.msgDn}↓` }}
+                />
+                <Pair
+                  keyId="insp:bytes"
+                  lead={pipe(" · ", fg(COL.dim))}
+                  sep={pipe(" / ", fg(COL.dim))}
+                  up={{ color: COL.out, title: "total bytes sent (↑), decoded (after permessage-deflate inflate)", text: () => fmtBytes(c.hist.totalUp) }}
+                  down={{ color: COL.in, title: "total bytes received (↓), decoded (after permessage-deflate inflate)", text: () => fmtBytes(c.hist.totalDown) }}
+                />
                 {ratio
                   ? Tag(
                       "⚙ permessage-deflate compression ratio · decoded bytes ÷ on-wire bytes, averaged over the connection",
