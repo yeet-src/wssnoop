@@ -1,8 +1,8 @@
-/* wssnoop/inspector — the drill-down overlay. Clicking a connection row sets
- * controls.selected to its key; root mounts this on top of the list as a Layer:
- * a translucent scrim that dims (and click-dismisses) the table behind, plus a
- * right-docked panel showing the connection's details and a live, scrollable
- * log of its decoded messages — newest first, click one to expand its payload.
+/* wssnoop/inspector — the drill-down view. Clicking a connection row sets
+ * controls.selected to its key; root mounts this over the body as a full-screen
+ * panel (the wide JSON payloads want the room) with a "‹ back" button and Esc to
+ * return. It shows the connection's details and a live, scrollable log of its
+ * decoded messages — newest first, click one to expand its payload.
  *
  * The decoder (lib/decode.js) has already inflated permessage-deflate and parsed
  * TEXT/JSON by the time state.js retains a message, so expanding a compressed
@@ -64,12 +64,6 @@ const copy = (text, note) => {
 
 const RULE = "─".repeat(400);
 const MAX_LINES = 400; /* cap an expanded payload so a huge frame can't run away */
-
-/* Panel takes most of the width — JSON is wide — but never the whole screen nor
- * less than a readable minimum; on a narrow terminal it's nearly full-screen.
- * It docks flush to the right edge, so the only inset is for a little air on the
- * left where the table stays visible. */
-const panelW = (cols) => Math.max(40, Math.min(cols - 4, Math.round(cols * 0.72)));
 
 const ageOf = (now, at) => `${fmtAgo(now - at)}`.padStart(4);
 const arrow = (dir) => (dir === DIR_WRITE ? fg(COL.out)("↑") : fg(COL.in)("↓"));
@@ -341,34 +335,26 @@ export default function Inspector({ groups, now, size }) {
 
   return (
     <Layer>
-      {/* scrim: dims the list and dismisses on click (panel sits on top, so a
-          click on the panel never reaches it) */}
+      {/* the panel fills the body area (under the toolbar, above the minibuffer):
+          a full-screen view, not a drawer — the wide JSON payloads want the room,
+          and a "‹ back" button (plus Esc) returns to the connection list. */}
       <Box
-        width="1fr"
-        height="1fr"
-        bg={COL.scrim}
-        onClick={closeInspector}
-        {...tip("inspector · click here or press Esc to close")}
-      />
-
-      {/* the panel — a drawer docked flush to the right edge. No surrounding
-          frame: it spans the full height against the right side and carries a
-          border on just its LEFT side (the seam where it meets the table), so it
-          reads as protruding from the edge rather than floating over it. */}
-      <Box
-        width={() => panelW(size.get().cols)}
+        left={0}
         right={0}
         top={0}
         bottom={0}
         z={1}
         bg={COL.panel}
-        border={{ line: "round", sides: ["left"], fg: COL.accent }}
         padding={[0, 1]}
         direction="column"
         overflow="hidden"
       >
         {/* title row */}
         <Box direction="row" height={1} break="none">
+          <Button title="back to the connection list (Esc)" onClick={closeInspector}>
+            ‹ back
+          </Button>
+          <Text break="none">{" "}</Text>
           <Text break="none">
             {() => {
               const c = lookup();
@@ -405,9 +391,6 @@ export default function Inspector({ groups, now, size }) {
             active={() => frozen.get()}
           >
             {() => (frozen.get() ? "❚❚ paused" : "● live")}
-          </Button>
-          <Button title="close the inspector (Esc)" onClick={closeInspector}>
-            ✕
           </Button>
         </Box>
 

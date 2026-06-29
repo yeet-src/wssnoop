@@ -43,6 +43,11 @@ export default function Root({ size, groups, global, stats, status, clock }) {
        <Layer>
         <Box width="1fr" height="1fr" overflow="hidden">
         {() => {
+          /* The inspector is a full-screen view, not an overlay: while it's open
+           * the table isn't rendered at all (a higher-z box doesn't reliably
+           * occlude the text/sparklines beneath it — see YEET-DX-NOTES.md #20),
+           * so swap rather than stack. */
+          if (isInspecting()) return null;
           /* Membership level: role is fixed once a conn handshakes, so the role
            * filter and the empty-group drop belong here (rebuild on toggle, not
            * per tick). activeOnly is time-varying, so it's applied per-row in
@@ -52,9 +57,9 @@ export default function Root({ size, groups, global, stats, status, clock }) {
            * the table — the sparkline's CellBuffer is sized at build time, so a
            * width change has to rebuild the row, same as a resize does. */
           const geom = layout(size.get().cols, destWidth.get());
-          /* Free-text targets messages while the inspector is open, so it only
-           * narrows the table when the inspector is closed. */
-          const q = isInspecting() ? "" : search.get();
+          /* Free-text narrows the table here; while the inspector is open it
+           * targets messages instead (and we've already returned above). */
+          const q = search.get();
           const info = procInfo.get();
           let view = groups
             .get()
