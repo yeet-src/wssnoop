@@ -94,7 +94,7 @@ const oneLine = (s) => (s == null ? "" : s.replace(/\s+/g, " ").trim());
  * minibuffer. This is how a line gets one tip per meaningful symbol instead of
  * a single catch-all tip on the whole row. Height-1 so a row of them aligns. */
 const Tag = (title, ...content) => (
-  <Box direction="row" height={1} break="none" {...tip(title)}>
+  <Box direction="row" width="fit" height={1} break="none" {...tip(title)}>
     <Text break="none">{content}</Text>
   </Box>
 );
@@ -459,18 +459,18 @@ export default function Inspector({ groups, now, size }) {
                   fg(COL.dim)(`opened ${fmtAgo(n - c.startedAt)}`),
                 )}
                 <Pair
-                  keyId="insp:msg"
+                  desc="messages"
                   lead={pipe(" · ", fg(COL.dim))}
                   sep={pipe(" ", fg(COL.dim))}
-                  up={{ color: COL.out, title: "messages sent (↑) on this connection", text: () => `${c.msgUp}↑` }}
-                  down={{ color: COL.in, title: "messages received (↓) on this connection", text: () => `${c.msgDn}↓` }}
+                  up={{ color: COL.out, label: "sent (↑)", text: () => `${c.msgUp}↑` }}
+                  down={{ color: COL.in, label: "received (↓)", text: () => `${c.msgDn}↓` }}
                 />
                 <Pair
-                  keyId="insp:bytes"
+                  desc="bytes decoded (after permessage-deflate inflate)"
                   lead={pipe(" · ", fg(COL.dim))}
                   sep={pipe(" / ", fg(COL.dim))}
-                  up={{ color: COL.out, title: "total bytes sent (↑), decoded (after permessage-deflate inflate)", text: () => fmtBytes(c.hist.totalUp) }}
-                  down={{ color: COL.in, title: "total bytes received (↓), decoded (after permessage-deflate inflate)", text: () => fmtBytes(c.hist.totalDown) }}
+                  up={{ color: COL.out, label: "sent (↑)", text: () => fmtBytes(c.hist.totalUp) }}
+                  down={{ color: COL.in, label: "received (↓)", text: () => fmtBytes(c.hist.totalDown) }}
                 />
                 {ratio
                   ? Tag(

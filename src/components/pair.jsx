@@ -1,37 +1,43 @@
 /* wssnoop/pair — a two-sided stat (sent ↑ / received ↓, or up / down byte
- * totals) rendered as two independently hoverable spans. Resting the pointer on
- * one side emboldens that side and surfaces its own tip, so the figure you're
- * reading stands out from its twin instead of sharing one catch-all tooltip.
+ * totals) rendered as two spans that share one tooltip. Resting the pointer on
+ * a side doesn't restyle the figure; instead the tooltip emboldens *that side's*
+ * label, so the explanation itself focuses on whichever half you're over.
  *
- * Module-keyed hover (hover.js), not a local signal, on purpose: the inspector
- * re-mints its detail lines every heartbeat, which would reset a local hover
- * boolean twice a second — the keyed highlight survives that rebuild.
- *
- * The two sides differ only by which figure and color they carry, so they're
- * the same Side with a latent parameter; callers vary the leading/middle
- * separators (" · ", " ", " / ") to match each site's surrounding line. */
+ * The sides are fit-width (the default Box width is 1fr, which would spread them
+ * across the row) and differ only by figure/color/label, so they're the same
+ * Side with a latent parameter; callers vary the separators (" · ", " ", " / ")
+ * to match each site's surrounding line. */
 
 import { Box, Text, fg, bold } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import { hoverTip, hovered } from "./hover.js";
+import { tip } from "../controls.js";
+import { COL } from "./palette.js";
 
-/* `text` is a thunk (counts climb live); `title` is a string or thunk, per the
- * hover API. Thread the figure through its color, then bold it only while this
- * exact side is hovered. */
-const Side = ({ k, color, title, text }) => (
-  <Box direction="row" height={1} break="none" {...hoverTip(k, title)}>
-    <Text break="none">{() => pipe(text(), fg(color), ...(hovered(k) ? [bold] : []))}</Text>
+/* The shared tooltip: `desc` names the stat, then each side's label, with the
+ * hovered side in its own color + bold and the other dimmed. */
+const tipFor = (desc, up, down, hotUp) => [
+  fg(COL.dim)(`${desc} · `),
+  hotUp ? pipe(up.label, fg(up.color), bold) : fg(COL.dim)(up.label),
+  fg(COL.dim)(" · "),
+  hotUp ? fg(COL.dim)(down.label) : pipe(down.label, fg(down.color), bold),
+];
+
+/* `text` is a thunk (figures climb live). The figure renders plainly in its
+ * color; the focus cue lives in the tooltip, not here. */
+const Side = ({ color, text, title }) => (
+  <Box direction="row" width="fit" height={1} break="none" {...tip(title)}>
+    <Text break="none">{() => fg(color)(text())}</Text>
   </Box>
 );
 
-export default function Pair({ keyId, lead, sep, up, down }) {
+export default function Pair({ desc, lead, sep, up, down }) {
   return (
-    <Box direction="row" height={1} break="none">
+    <Box direction="row" width="fit" height={1} break="none">
       {lead != null ? <Text break="none">{lead}</Text> : null}
-      <Side k={`${keyId}:up`} color={up.color} title={up.title} text={up.text} />
+      <Side color={up.color} text={up.text} title={() => tipFor(desc, up, down, true)} />
       <Text break="none">{sep}</Text>
-      <Side k={`${keyId}:dn`} color={down.color} title={down.title} text={down.text} />
+      <Side color={down.color} text={down.text} title={() => tipFor(desc, up, down, false)} />
     </Box>
   );
 }

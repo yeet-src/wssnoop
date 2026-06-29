@@ -52,10 +52,10 @@ export default function Row({ conn, now, span, geom, order, visible, depth = 0 }
         </Box>
         <Box width={W_MSG} overflow="hidden">
           <Pair
-            keyId={conn.key}
+            desc="messages on this connection"
             sep=" "
-            up={{ color: COL.out, title: "messages sent (↑) on this connection", text: () => (now.get(), `${conn.msgUp}↑`) }}
-            down={{ color: COL.in, title: "messages received (↓) on this connection", text: () => (now.get(), `${conn.msgDn}↓`) }}
+            up={{ color: COL.out, label: "sent (↑)", text: () => (now.get(), `${conn.msgUp}↑`) }}
+            down={{ color: COL.in, label: "received (↓)", text: () => (now.get(), `${conn.msgDn}↓`) }}
           />
         </Box>
       </Box>

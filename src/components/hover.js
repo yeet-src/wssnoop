@@ -20,11 +20,6 @@ const key = signal(null);
  * at rest (e.g. a top-bar item that mustn't let neighbours overlap it). */
 export const hoverBg = (k, base) => computed(() => (key.get() === k ? COL.hover : base));
 
-/* Is the pointer currently resting on element `k`? Read inside a render thunk
- * so it tracks: a side that emboldens itself on hover (see components/pair.jsx)
- * reads this to know which of a pair the pointer is over. */
-export const hovered = (k) => key.get() === k;
-
 /* Tooltip + highlight for a clickable element — use in place of `tip()` (it is
  * a superset). `t` may be a string or thunk, like `tip`. */
 export const hoverTip = (k, t) => ({
