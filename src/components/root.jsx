@@ -29,6 +29,13 @@ import { procInfo } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";
 
 export default function Root({ size, groups, global, stats, status, clock }) {
+  /* Memoize the inspector node: a bare `{() => …}` child re-runs on every
+   * parent render pass (the heartbeat), minting a fresh <Inspector> each tick
+   * and resetting its per-node state; a computed only recomputes when
+   * `selected` flips, so the element reference is stable and it mounts once. */
+  const inspector = computed(() =>
+    selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null,
+  );
   return (
     <Box direction="column" width="1fr" height="1fr" bg={COL.bg}>
       <Toolbar global={global} stats={stats} status={status} now={clock} span={vizRange} sizeSig={size} />
@@ -135,7 +142,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
           );
         }}
         </Box>
-        {() => (selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null)}
+        {inspector}
         {/* While dragging the column handle, a transparent full-screen lid
             tracks the pointer anywhere on screen (it needn't stay on the 1-cell
             handle) and ends the drag on release. */}

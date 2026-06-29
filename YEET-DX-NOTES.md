@@ -113,6 +113,28 @@ reality · **[uncatchable]** can't be handled from JS.
   opaque box's `bg` clears the cells beneath it (or expose an `opaque`/clear flag
   on the covering box).
 
+### 22. A bare inline thunk child re-mounts its subtree every render pass **[silent]**
+- **Symptom:** A conditional child written as a bare thunk —
+  `{() => cond.get() ? <Panel/> : null}` — re-creates `<Panel>` on *every*
+  render pass of its container (≈ each heartbeat here), even when `cond` is
+  unchanged. Per-node local state is silently reset on that cadence: a
+  `setHover` boolean never sticks, a `signal()` declared in the component body
+  resets ~2×/s. Confirmed with a module-level mount counter (1 → climbing 2/s).
+- **Cause:** No stable node identity / reconciliation (it's signals, not a
+  vdom). A bare thunk is re-invoked by the framework whenever its container
+  re-renders and mints a fresh element each time; the old node (and its local
+  signals) is discarded.
+- **Workaround:** Memoize the node in a `computed` so it recomputes only when a
+  *read* signal changes, keeping the element reference stable:
+  `const panel = computed(() => cond.get() ? <Panel/> : null)` then `{panel}`.
+  The subtree then mounts once and its own internal thunks drive liveness.
+  (wssnoop did this for the inspector; its buttons' local hover now persists,
+  removing a module-keyed-hover workaround.) For state that must outlive a
+  genuine remount, hoist it to a module-level signal keyed by identity.
+- **Suggested fix:** Either memoize bare thunk children by referential equality
+  of their result, or document that conditional/dynamic children belong in a
+  `computed`, not a bare thunk.
+
 ---
 
 ## Runtime / isolate

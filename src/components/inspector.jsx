@@ -12,10 +12,10 @@
  * It reads the clock (`now`) in its own thunks, so counts and the message log
  * stay live without the caller re-rendering; it resolves `selected` against the
  * live registry each frame, so a closed/evicted connection degrades to a notice
- * rather than a stale freeze. View-state (scroll/expand/freeze) lives in
- * controls.js, not here: the root body re-projects on membership churn, which
- * re-creates this component — module-level signals survive that; `inspect`
- * resets them when a new connection is opened. */
+ * rather than a stale freeze. Root memoizes this node on `selected`, so it
+ * mounts once per open (not per heartbeat) and its internal thunks drive the
+ * liveness. View-state (scroll/expand/freeze) lives in controls.js so it
+ * survives a close/reopen cleanly; `inspect` resets it for a new connection. */
 
 import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
 import { pipe } from "yeet:helpers";
