@@ -10,7 +10,7 @@
 
 import { signal, computed } from "yeet:tui";
 
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 import { hoverTitle } from "../controls.js";
 
 const key = signal(null);

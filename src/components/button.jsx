@@ -13,7 +13,7 @@
 import { Box, Text, face, signal, computed } from "yeet:tui";
 
 import { hoverTitle } from "../controls.js";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 
 /* Children and `active` may be plain or thunks — the toolbar's labels and
  * toggle state are live, so we resolve both reactively. `label` reads its thunk

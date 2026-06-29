@@ -14,7 +14,7 @@ import { Box, Text, face, computed } from "yeet:tui";
 import Button from "./button.jsx";
 import Group from "./group.jsx";
 import Sparkline from "./sparkline.jsx";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 import { GAP, HANDLE } from "./columns.js";
 import { collapseFor, cycleGroup, COLLAPSE_LABELS, sortKey, filters, tip } from "../controls.js";
 import { recentBytes, groupMetric, rankMap } from "../lib/rank.js";

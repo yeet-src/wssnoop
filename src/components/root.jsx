@@ -17,7 +17,7 @@ import Container from "./container.jsx";
 import Inspector from "./inspector.jsx";
 import Minibuffer from "./minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 import { layout, START, DEST_MIN } from "./columns.js";
 import {
   vizRange, sortKey, filters, selected, search, matches, isInspecting,

@@ -23,7 +23,7 @@ import { pipe } from "yeet:helpers";
 import Button from "./button.jsx";
 import Pair from "./pair.jsx";
 import { hoverTip, hoverBg } from "./hover.js";
-import { COL, roleColor, jsonColor } from "./palette.js";
+import { COL, roleColor, jsonColor } from "../palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
@@ -105,9 +105,8 @@ const Tag = (title, ...content) => (
  * very edge) z-stacked over the message text — an rgba bg dims the content
  * beneath it, the same trick the scrim uses to dim the table. The 8-digit hex
  * is #RRGGBBAA over COL.panel (#11161f). */
-const FADE = ["#11161f59", "#11161fa6", "#11161fe6"]; // sheer → near-opaque
 const EdgeFade = ({ edge }) => {
-  const rows = edge === "top" ? [...FADE].reverse() : FADE; // opaque at the edge
+  const rows = edge === "top" ? [...COL.panelFade].reverse() : COL.panelFade; // opaque at the edge
   return (
     <Box
       left={0}

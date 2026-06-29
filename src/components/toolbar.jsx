@@ -13,7 +13,7 @@ import { Box, Text, face, computed, signal } from "yeet:tui";
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
 import { hoverTip, hoverBg } from "./hover.js";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
 import {
   vizRange, RANGE_LABELS, cycleViz,

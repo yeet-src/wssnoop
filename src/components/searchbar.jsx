@@ -7,7 +7,7 @@ import { Box, Text, bold, fg } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
 import { search, searchActive, isInspecting } from "../controls.js";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 
 export default function SearchBar() {
   return (

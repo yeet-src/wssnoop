@@ -12,7 +12,7 @@ import { Box, Text, face } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
 import Pair from "./pair.jsx";
-import { COL, roleColor } from "./palette.js";
+import { COL, roleColor } from "../palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
 import { tip, inspect } from "../controls.js";
 import { destOf, destTip } from "../probes/peers.js";

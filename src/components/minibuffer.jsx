@@ -5,7 +5,7 @@
 import { Box, Text, face } from "yeet:tui";
 
 import { hoverTitle, toast } from "../controls.js";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 
 const HINT =
   "click a connection → inspect · decode · ⊙ focus the kernel · ⧉ copy fixtures    ·    / search · q quit";

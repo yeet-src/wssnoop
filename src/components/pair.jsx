@@ -12,7 +12,7 @@ import { Box, Text, fg, bold } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
 import { tip } from "../controls.js";
-import { COL } from "./palette.js";
+import { COL } from "../palette.js";
 
 /* The shared tooltip: `desc` names the stat, then each side's label, with the
  * hovered side in its own color + bold and the other dimmed. */
