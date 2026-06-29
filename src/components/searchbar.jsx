@@ -4,6 +4,7 @@
  * table otherwise (main.jsx routes keystrokes; controls.js holds the state). */
 
 import { Box, Text, bold, fg } from "yeet:tui";
+import { pipe } from "yeet:helpers";
 
 import { search, searchActive, isInspecting } from "../controls.js";
 import { COL } from "./palette.js";
@@ -18,7 +19,7 @@ export default function SearchBar() {
           if (!active && !q) return "";
           const scope = isInspecting() ? "messages" : "connections";
           return [
-            bold(fg(COL.accent)(`  /${scope} `)),
+            pipe(`  /${scope} `, fg(COL.accent), bold),
             fg(COL.ink)(q),
             active ? fg(COL.accent)("▏") : "",
             fg(COL.header)(active ? "   enter: keep · esc: clear" : "   esc: clear"),

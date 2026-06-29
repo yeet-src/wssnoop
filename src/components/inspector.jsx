@@ -333,7 +333,7 @@ export default function Inspector({ groups, now, size }) {
           ),
         )}
         {lines.length > MAX_LINES ? (
-          <Text break="none">{italic(fg(COL.header)(`… ${lines.length - MAX_LINES} more lines`))}</Text>
+          <Text break="none">{pipe(`… ${lines.length - MAX_LINES} more lines`, fg(COL.header), italic)}</Text>
         ) : null}
       </Box>
     );
@@ -372,9 +372,9 @@ export default function Inspector({ groups, now, size }) {
           <Text break="none">
             {() => {
               const c = lookup();
-              if (!c) return bold(fg(COL.warn)("connection closed"));
+              if (!c) return pipe("connection closed", fg(COL.warn), bold);
               return [
-                bold(fg(COL.accent)("inspect ")),
+                pipe("inspect ", fg(COL.accent), bold),
                 fg(COL.dim)(`#${c.conn} `),
                 fg(roleColor(c.role))(`[${c.role}]`),
               ];
@@ -570,7 +570,7 @@ export default function Inspector({ groups, now, size }) {
                 count = all.length;
                 if (count === 0) {
                   const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
-                  return <Text break="none">{italic(fg(COL.header)(msg))}</Text>;
+                  return <Text break="none">{pipe(msg, fg(COL.header), italic)}</Text>;
                 }
                 const top = Math.min(Math.max(0, scroll.get()), Math.max(0, count - viewH()));
                 const open = expanded.get();
@@ -630,12 +630,12 @@ export default function Inspector({ groups, now, size }) {
         {/* footer hint */}
         <Text break="none">
           {() =>
-            italic(
-              fg(COL.header)(
-                frozen.get()
-                  ? `paused · ${count} msgs · scroll for older · click ● live to resume · Esc to close`
-                  : `live · ${count} msgs · click a message to pause & expand · Esc to close`,
-              ),
+            pipe(
+              frozen.get()
+                ? `paused · ${count} msgs · scroll for older · click ● live to resume · Esc to close`
+                : `live · ${count} msgs · click a message to pause & expand · Esc to close`,
+              fg(COL.header),
+              italic,
             )
           }
         </Text>
