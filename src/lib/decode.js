@@ -356,6 +356,7 @@ export function createDecoder({ debug = false } = {}) {
      * we've already advanced. A fresh HTTP handshake mid-stream is the tell —
      * reset, or we'd concatenate two different connections and desync. */
     if (s.phase !== "handshake" && looksHttp(chunk)) {
+      s.inflater?.free(); /* new connection on a reused SSL*: release the old stream */
       s = freshState();
       conns.set(key, s);
       out.push(ev(e, { type: "reset" }));
@@ -429,8 +430,11 @@ export function createDecoder({ debug = false } = {}) {
    * inflater) doesn't grow without bound as connections churn. `key` is
    * `${pid}:${ssl}`; both directions are dropped. */
   function drop(key) {
-    conns.delete(`${key}:0`);
-    conns.delete(`${key}:1`);
+    for (const dir of [0, 1]) {
+      const k = `${key}:${dir}`;
+      conns.get(k)?.inflater?.free(); /* release the native stream, don't wait for GC */
+      conns.delete(k);
+    }
   }
 
   return { push, drop };
