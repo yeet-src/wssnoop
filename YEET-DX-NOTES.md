@@ -73,23 +73,6 @@ reality · **[uncatchable]** can't be handled from JS.
   document loudly that `break`/`overflow` are *container* concerns (the API note
   says so in passing, but the failure mode — vertical bleed — is non-obvious).
 
-### 17. Auto-width box around a dynamic thunk under-measures its right edge **[silent]**
-- **Symptom:** Two adjacent `gap={1}` boxes whose text came from thunks rendered
-  with **no gap** between them (`libssl.so0 ws`); the right box's text overlapped
-  the next sibling by ~1 cell per separator glyph. `displayWidth("·")` is a
-  correct `1`, so it's not the glyph — it's the box's intrinsic measure.
-- **Cause:** The intrinsic width of a container wrapping a thunk/`computed` run
-  comes out ~1 short (per `·`/break-unit), so the slot is narrower than what
-  paints; with `overflow:visible` the tail spills past the slot and eats the gap,
-  and with `overflow:hidden` it clips a visible char even when space is free.
-  The flex *shrink* path (`layout/module.js` "shrink towards min content") also
-  splits such boxes oddly at narrow widths.
-- **Workaround:** Don't butt auto-width thunk-boxes together — render the related
-  pieces as **one run** with explicit interior spacing; reserve separate boxes
-  (for per-element tooltips) only where a gap can't collapse into a flex spacer.
-- **Suggested fix:** Measure container intrinsics with the same `displayWidth`
-  the renderer paints with, so slot width == painted width.
-
 ### 21. A function `bg` (the `(x,y,w,h)=>color` shader) silently doesn't paint **[silent]**
 - **Symptom:** `<Box bg={(x,y,w,h)=>...}/>` rendered with **no fill** — the cells
   kept the surface color underneath, as if `bg` were absent. No error. A static
@@ -134,36 +117,20 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## Runtime / isolate
 
-### 22. RETRACTED — "yeet.exit() hangs / keydown listener threw" was daemon state, not a code bug
-- **What I claimed (wrong):** that `yeet.exit()` from a tty listener gets caught
-  by the event-emitter's try/catch and hangs, and that a live `setInterval`
-  keeps the isolate alive. I built that theory on a daemon I'd **wedged** with
-  heavy run/kill churn (stale isolates piling up, see #11; worker-manager
-  wedging, see #19).
-- **What's actually true (clean daemon):** `tty.on("keydown", () => yeet.exit())`
-  exits cleanly — bare, with a prior `teardown()` in the same listener, with a
-  live `setInterval`, and with the real wssnoop BPF tap. No `keydown listener
-  threw`, no hang, no isolate leak across runs. Verified with the harness
-  (`scripts/wss-harness.sh`) once the daemon was healthy.
-- **Lesson:** the hang and the `keydown listener threw: TypeError: yeet.exit`
-  message are **downstream symptoms of a degraded daemon** (#11 stale jails /
-  #19 wedged worker manager), not an exit/keydown bug. When exit "hangs",
-  reap stale isolates / restart the daemon before theorising. Always confirm a
-  runtime claim against a freshly-restarted daemon.
-- **One real (minor) wart left:** a normal `q` quit exits with **code 1** (the
-  exit unwinds via a thrown sentinel that reaches module top), where 0 would be
-  tidier. Harmless — it does exit. (`exit.rs` throws `TypeError("yeet.exit")`
-  after `terminate_execution()`; that's the documented unwind mechanism.)
-
 ### 4. A hard V8-worker death is uncatchable and paints over the screen **[uncatchable]**
-- **Symptom:** TTY closes with no message after <1 min under load; daemon log
-  shows `watchdog] V8 worker died. Respawning worker.` There is no JS exception.
-- **Cause:** No global `unhandledrejection` / `onerror` hook exists. A memory or
-  native fault kills the worker process; JS never sees it. (See gotcha 12 for the
+- **Memory cause FIXED on `ben/daemon-fixes`:** the `<1 min under load` death
+  was memory growth, now addressed — V8 GC never finalized for a timer-only TUI
+  so old-gen climbed to the ceiling (`22e05828` pump foreground tasks), and the
+  signal graph retained every unwatched sink (~33 MiB/min leak, `5c621ce7`).
+  Heap exhaustion is now a clean force-terminate + dispose (`78a7d6dc`,
+  `8ee4f26d`) rather than a hard worker death. (Re-verify under churn on the
+  rebuilt daemon — see the resolved note at the end.)
+- **Residual (still open):** a *genuine* native fault is still uncatchable —
+  there's no global `unhandledrejection` / `onerror` hook, so JS never sees it
+  and the watchdog respawn leaves a torn alt-screen. (See gotcha 12 for the
   *catchable* sibling.)
 - **Workaround:** Catch at the two boundaries you own (`mount()` try/catch →
-  BSOD; wrap timer/subscription callbacks). For the hard case, there is no
-  in-JS remedy — only reducing pressure (we cut per-event allocations).
+  BSOD; wrap timer/subscription callbacks).
 - **Suggested fix:** Expose an opt-in `yeet.onWorkerFault(cb)` (even
   best-effort, fired by the watchdog before respawn) so a script can repaint a
   crash banner instead of leaving a torn alt-screen. At minimum, restore the
@@ -250,22 +217,6 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## Tooling / run mechanics
 
-### 11. `yeet run` outlives its client; stale jails keep rendering **[silent]**
-- **Symptom:** During soak testing, panes showed *identical frozen* stats. A
-  detached daemon-managed `yeetd: jail` from a previous run was still rendering;
-  the tmux pane was a corpse.
-- **Cause:** `yeet run` spawns a daemon-managed jail that survives the
-  client/pane dying. The pane is not the process.
-- **Workaround:** Monitor the **jail PID** + the daemon log, not the pane.
-  `sudo kill -9` to reap (jails are root-owned). The repeatable recipe:
-  ```sh
-  # start workers + attach in ONE bash pane (see #12), then watch the jail:
-  watch -n2 'pgrep -af "yeetd: jail"; sudo strings /tmp/yeetd.log | tail -3'
-  ```
-- **Suggested fix:** `yeet ps` / `yeet kill` to list+reap jails without sudo
-  archaeology; and tie a foreground `yeet run` to its client by default
-  (`--detach` to opt out).
-
 ### 12. Bare `--bin node` won't attach; needs an absolute path
 - **Symptom:** `Could not resolve uprobe attach target: node`.
 - **Cause:** uprobe attach doesn't `$PATH`-resolve the binary.
@@ -300,19 +251,20 @@ reality · **[uncatchable]** can't be handled from JS.
   CellBuffer sparklines, O(1) message ring, json-on-demand. This made the
   **calm** demo stable (verified: renders + 0 deaths over a soak).
 - Dropped egress-only mode (#7) — the in-kernel focus filter covers it.
-- Demo knobs are CLI flags, not env vars (#15); soak recipe documented (#11).
+- Demo knobs are CLI flags, not env vars (#15).
 - Migrated combinators → `<Text>` attrs / `face()` (#1) where the style is uniform.
 - Automatic bin discovery: `--bin node` (bare) or `--pid N` resolves the SSL
   binary from the process graph (#12).
 
-## Open issue: hard death still recurs under heavy reconnect churn
-The memory work fixed the *calm* case, but the death is **not fully gone**. With
-`./demo/run.sh start --recycle 6000` (every connection of all 3 workers recycling
-~every 6 s, full market-data firehose, captured via `--bin node` with no `--pid`),
-the worker still dies hard (#4) ~6–8 s in — right as churn begins. It renders
-fine until then. The baseline (pre-UI-work) reproduces this identically, so it's
-pre-existing, not a regression from the UI pass. Likely still allocation/GC
-pressure from the conn create/drop + decoder reassembly storm, but unconfirmed —
-it needs heap profiling under churn, which the runtime gives no hook for (#4).
-Mitigations to try: cap conns harder under churn, pool the decode buffers, or
-pin a `--pid`/`⊙ focus` to shrink the firehose.
+## Resolved: the memory-pressure death (was: "hard death under churn")
+The churn death — `./demo/run.sh start --recycle 6000` killing the worker ~6–8 s
+in — traced to two daemon bugs now fixed on `ben/daemon-fixes`: V8 GC never
+finalized for a timer-only TUI so old-gen climbed to the heap ceiling
+(`22e05828`), and the signal graph retained every unwatched sink, leaking
+~33 MiB/min (`5c621ce7`). Heap exhaustion is now a clean force-terminate +
+dispose (`78a7d6dc`, `8ee4f26d`) rather than a hard worker death. The wssnoop
+mitigations (smaller capture chunk, CellBuffer sparklines, O(1) message ring,
+json-on-demand) still help but were treating a symptom.
+**To do:** re-run the `--recycle 6000` churn soak on the rebuilt daemon; if it
+holds, the residual of #4 is only the *genuine* native-fault case (no in-JS
+hook), and this note can go entirely.
