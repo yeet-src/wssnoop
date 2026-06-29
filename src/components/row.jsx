@@ -15,6 +15,7 @@ import Pair from "./pair.jsx";
 import { COL, roleColor } from "./palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
 import { tip, inspect } from "../controls.js";
+import { destOf, destTip } from "../probes/peers.js";
 import { hoverTip, hoverBg } from "./hover.js";
 
 const roleTip = (c) =>
@@ -46,8 +47,8 @@ export default function Row({ conn, now, span, geom, order, visible, depth = 0 }
           {/* role colour is per-value, so a runtime face() patch, not a static attr */}
           <Text>{() => (now.get(), face({ fg: roleColor(conn.role) })(conn.role))}</Text>
         </Box>
-        <Box width={geom.dest} overflow="ellipsis" break="none" {...tip(() => `destination: ${conn.dest}`)}>
-          <Text fg={COL.dim}>{() => (now.get(), conn.dest)}</Text>
+        <Box width={geom.dest} overflow="ellipsis" break="none" {...tip(() => destTip(conn))}>
+          <Text fg={COL.dim}>{() => (now.get(), destOf(conn))}</Text>
         </Box>
         <Box width={W_MSG} overflow="hidden">
           <Pair

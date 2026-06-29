@@ -27,6 +27,7 @@ import { COL, roleColor, jsonColor } from "./palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
 import { DIR_WRITE } from "../lib/decode.js";
+import { destOf, destTip, peerInfo } from "../probes/peers.js";
 import {
   selected,
   selectedConn,
@@ -447,8 +448,8 @@ export default function Inspector({ groups, now, size }) {
                   fg(COL.dim)(" · "),
                   fg(roleColor(c.role))(c.role),
                 )}
-                <Box direction="row" width="1fr" height={1} break="none" {...tip("destination · the wss:// URL this connection is talking to")}>
-                  <Text break="none" overflow="ellipsis">{[fg(COL.dim)(" · "), fg(COL.dim)(c.dest)]}</Text>
+                <Box direction="row" width="1fr" height={1} break="none" {...tip(() => destTip(c))}>
+                  <Text break="none" overflow="ellipsis">{[fg(COL.dim)(" · "), fg(COL.dim)(destOf(c))]}</Text>
                 </Box>
               </Box>,
               /* line 2: age + message counts + byte totals + compression ratio */
@@ -499,6 +500,11 @@ export default function Inspector({ groups, now, size }) {
                 row("agent", c.headers["user-agent"]),
                 row("opcodes", ops),
               );
+              /* The process's socket endpoints (best-effort, from the kernel) —
+               * the only way to learn where a handshake-less connection points,
+               * though not which stream maps to which (see probes/peers.js). */
+              const eps = peerInfo.get()[c.pid]?.endpoints ?? [];
+              if (eps.length) lines.push(row("peers", eps.join(" · ")));
               if (c.closeCode != null)
                 lines.push(row("close", `${c.closeCode}${c.closeReason ? ` "${c.closeReason}"` : ""}`));
             }

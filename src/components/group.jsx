@@ -22,6 +22,7 @@ import {
 } from "../controls.js";
 import { connMetric, recentBytes, rankMap } from "../lib/rank.js";
 import { procInfo, resolve } from "../probes/procinfo.js";
+import { resolvePeers } from "../probes/peers.js";
 
 const glyph = (n) => (n === 0 ? "▸" : "▾");
 const nextCollapse = (n) => COLLAPSE_STEPS[(COLLAPSE_STEPS.indexOf(n) + 1) % COLLAPSE_STEPS.length];
@@ -29,6 +30,7 @@ const nextCollapse = (n) => COLLAPSE_STEPS[(COLLAPSE_STEPS.indexOf(n) + 1) % COL
 export default function Group({ group, conns, now, span, geom, order, depth = 0, visible }) {
   const { pid, hist } = group;
   resolve(pid); /* fire-and-forget identity lookup; cached, published reactively */
+  resolvePeers(pid); /* and its socket endpoints, to recover handshake-less dests */
 
   const headerTip = () => {
     const id = procInfo.get()[pid];
