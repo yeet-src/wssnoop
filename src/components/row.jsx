@@ -60,7 +60,7 @@ export default function Row({ conn, now, span, geom, order, visible, depth = 0 }
         </Box>
       </Box>
       <Box width={HANDLE} break="none" />
-      <Sparkline hist={conn.hist} now={now} span={span} width={geom.spark} variant="conn" />
+      <Sparkline hist={conn.hist} now={now} span={span} width={geom.spark} originX={geom.left + HANDLE} variant="conn" />
     </Box>
   );
 }

@@ -40,6 +40,8 @@ import {
   typeSearch,
   backspaceSearch,
   keymap,
+  cursorPinned,
+  clearCursor,
 } from "./controls.js";
 
 const args = (typeof yeet !== "undefined" && yeet.args) || {};
@@ -86,6 +88,7 @@ tty.on("keydown", (e) => {
   }
   if (e.code === "Escape") {
     if (search.get()) return clearSearch();
+    if (cursorPinned.get()) return clearCursor();
     if (isInspecting()) return closeInspector();
     return yeet.exit();
   }

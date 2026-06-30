@@ -4,7 +4,7 @@
 
 import { Box, Text, face } from "yeet:tui";
 
-import { hoverTitle, toast } from "../controls.js";
+import { hoverTitle, toast, cursorReadout } from "../controls.js";
 import { COL } from "../palette.js";
 
 const HINT =
@@ -20,7 +20,9 @@ export default function Minibuffer() {
         {() => {
           const flash = toast.get();
           if (flash) return face({ fg: COL.accent })(flash);
-          const t = hoverTitle.get();
+          /* A bar's per-column readout (when the pointer is on a sparkline) wins
+           * over the row tip the pointer also sits inside; then the plain tip. */
+          const t = cursorReadout.get() ?? hoverTitle.get();
           const text = typeof t === "function" ? t() : t;
           return text ? face({ fg: COL.dim })(text) : face({ fg: COL.header, italic: true })(HINT);
         }}

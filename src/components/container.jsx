@@ -66,7 +66,7 @@ export default function Container({ cid, name, image, members, hist, now, span, 
           <Text break="none" fg={COL.dim}>{`${members.length} proc`}</Text>
         </Box>
         <Box width={HANDLE} break="none" />
-        <Sparkline hist={hist} now={now} span={span} width={geom.spark} variant="agg" />
+        <Sparkline hist={hist} now={now} span={span} width={geom.spark} originX={geom.left + HANDLE} variant="agg" />
       </Box>
       {members.map((m) => (
         <Group

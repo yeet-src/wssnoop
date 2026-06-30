@@ -125,6 +125,45 @@ export const closeInspector = () => {
 };
 export const isInspecting = () => selected.get() != null;
 
+/* ---- shared time cursor (the sparkline crosshair) -------------------- */
+/* A fractional position 0..1 across the activity window [now-span, now]. Every
+ * sparkline renders that same window column-aligned, so one frac picks the same
+ * instant in all of them: hovering a bar drops a vertical line through every bar
+ * at that moment (compare egress across processes at a glance), and clicking
+ * pins it ("focus an event") so the line survives the pointer leaving — click
+ * again, or Esc, to release. */
+export const cursorFrac = signal(null); // 0..1 across the window, or null (no cursor)
+export const cursorPinned = signal(false);
+/* The readout for the bar the pointer is currently over (a thunk naming the
+ * instant + that bar's bytes there). Held separately from hoverTitle because
+ * the row under the bar also writes hoverTitle on enter and would clobber it;
+ * the minibuffer shows this with priority while it's set. */
+export const cursorReadout = signal(null);
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+export const moveCursor = (frac, readout) => {
+  cursorFrac.set(clamp01(frac));
+  if (readout !== undefined) cursorReadout.set(readout);
+};
+export const leaveCursor = () => {
+  cursorReadout.set(null);
+  if (!cursorPinned.get()) cursorFrac.set(null); // a pinned line stays put
+};
+export const toggleCursorPin = (frac) => {
+  if (cursorPinned.get()) {
+    cursorPinned.set(false);
+    cursorFrac.set(null);
+    flash("event focus released");
+  } else {
+    cursorFrac.set(clamp01(frac));
+    cursorPinned.set(true);
+    flash("focused this moment · the crosshair is pinned across all activity bars (click a bar again, or Esc, to release)");
+  }
+};
+export const clearCursor = () => {
+  cursorPinned.set(false);
+  cursorFrac.set(null);
+};
+
 /* ---- kernel capture focus (user → kernel write) ---------------------- */
 /* The connection key the BPF filter is pinned to, or null for "capture all".
  * state.js watches this and patches the probe's .bss globals, so focusing a

@@ -140,7 +140,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         </Box>
         <Box width={HANDLE} break="none" />
         {() => (
-          <Sparkline hist={ghist.get()} now={now} span={span} width={geom().spark} variant="global" />
+          <Sparkline hist={ghist.get()} now={now} span={span} width={geom().spark} originX={geom().left + HANDLE} variant="global" />
         )}
       </Box>
 

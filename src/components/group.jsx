@@ -107,7 +107,7 @@ export default function Group({ group, conns, now, span, geom, order, depth = 0,
           <Text break="none" fg={COL.dim}>{`${conns.length} ws`}</Text>
         </Box>
         <Box width={HANDLE} break="none" />
-        <Sparkline hist={hist} now={now} span={span} width={geom.spark} variant="agg" />
+        <Sparkline hist={hist} now={now} span={span} width={geom.spark} originX={geom.left + HANDLE} variant="agg" />
       </Box>
       {conns.map((c) => (
         <Row
