@@ -125,6 +125,14 @@ export const closeInspector = () => {
 };
 export const isInspecting = () => selected.get() != null;
 
+/* ---- help screen ----------------------------------------------------- */
+/* A full-body explanatory screen (a swap, not a z-overlay — see the inspector
+ * for why a stacked box can't occlude the sparklines beneath). `?` toggles it;
+ * Esc / the back button close it. It hides the table and inspector while open. */
+export const helpOpen = signal(false);
+export const toggleHelp = () => helpOpen.update((v) => !v);
+export const closeHelp = () => helpOpen.set(false);
+
 /* ---- shared time cursor (the sparkline crosshair) -------------------- */
 /* A fractional position 0..1 across the activity window [now-span, now]. Every
  * sparkline renders that same window column-aligned, so one frac picks the same

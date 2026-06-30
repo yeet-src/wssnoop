@@ -23,6 +23,7 @@ import {
   search, searchActive, startSearch,
   focusKey, clearFocus,
   destWidth, dragging, startColDrag, resetColWidth,
+  toggleHelp,
   titles, tip,
 } from "../controls.js";
 
@@ -77,6 +78,9 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             ]}
           </Text>
         </Box>
+        {/* Help button — kept on the left, before the 1fr spacer, so it's always
+            visible (the right control cluster clips its tail at narrow widths). */}
+        <Button title="help (?) · what everything means and the keys" onClick={toggleHelp}>?</Button>
         {/* capture-focus indicator: visible only when the kernel filter is
             pinned to one connection; click to release. */}
         <Box

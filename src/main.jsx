@@ -42,6 +42,9 @@ import {
   keymap,
   cursorPinned,
   clearCursor,
+  helpOpen,
+  toggleHelp,
+  closeHelp,
 } from "./controls.js";
 
 const args = (typeof yeet !== "undefined" && yeet.args) || {};
@@ -82,11 +85,16 @@ tty.on("keydown", (e) => {
 
   /* Command mode. Esc progressively backs out: clear filter → close inspector
    * → quit. "/" opens search. q quits. */
+  if (key === "?") {
+    e.preventDefault?.();
+    return toggleHelp();
+  }
   if (key === "/") {
     e.preventDefault?.();
     return startSearch();
   }
   if (e.code === "Escape") {
+    if (helpOpen.get()) return closeHelp();
     if (search.get()) return clearSearch();
     if (cursorPinned.get()) return clearCursor();
     if (isInspecting()) return closeInspector();
@@ -98,7 +106,7 @@ tty.on("keydown", (e) => {
    * toolbar buttons run, each discoverable via the button's mouseover. Gated to
    * the table view so they don't fire behind the inspector overlay. */
   const action = keymap[key];
-  if (action && !isInspecting()) {
+  if (action && !isInspecting() && !helpOpen.get()) {
     e.preventDefault?.();
     action();
   }
