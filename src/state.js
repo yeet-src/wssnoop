@@ -41,7 +41,6 @@ import { focusKey, clearFocus } from "./controls.js";
 /* Idle eviction matches the max viz range — a conn silent longer than the
  * longest sparkline window can show carries no visible data, so drop it. */
 const RETENTION_MS = 1_800_000; // 30 min == the longest viz window (900 buckets * 2s)
-const CLOSE_GRACE_MS = 20_000; // keep a closed conn visible briefly, then drop it
 const HEARTBEAT_MS = 500;
 
 /* Hard memory backstop on top of idle eviction (a pathological host could open
@@ -321,10 +320,12 @@ export function createRegistry({ onDrop } = {}) {
   /* Drop conns idle past retention, then enforce the hard caps. Returns nothing
    * — mutates the registry. Called from the heartbeat before snapshotting. */
   function evict(now) {
-    /* Snapshot keys before deleting — don't mutate the Map mid-iteration. */
+    /* Snapshot keys before deleting — don't mutate the Map mid-iteration. A
+     * closed conn is kept (its decoded messages stay inspectable), evicted by
+     * the same idle rule as any other — its lastActiveAt froze at the close, so
+     * it drops one retention window later, not on a short grace timer. */
     for (const [key, c] of [...conns]) {
-      if (c.status === "closed" && c.closedAt != null && now - c.closedAt > CLOSE_GRACE_MS) dropConn(key);
-      else if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
+      if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
     }
     if (conns.size > MAX_CONNS) {
       const order = [...conns.values()].sort((a, b) => a.lastActiveAt - b.lastActiveAt);

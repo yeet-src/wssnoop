@@ -248,7 +248,7 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(reg.snapshot().groups.length, 0, "registry: non-websocket drops the conn");
 }
 {
-  // CLOSE → closed + focusGone; evicted after the grace window
+  // CLOSE → closed + focusGone; data kept, evicted only by the idle retention
   const reg = createRegistry();
   reg.ingest({ type: "message", pid: 3, ssl: 30n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1000);
   reg.ingest({ type: "message", pid: 3, ssl: 30n, dir: DIR_READ, msg: { name: "CLOSE", opcode: 0x8, control: true, len: 2, closeCode: 1000, closeReason: "bye" } }, 2000);
@@ -256,8 +256,10 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(c.status, "closed", "registry: CLOSE marks the conn closed");
   eq(c.closeCode, 1000, "registry: close code recorded");
   ok(reg.focusGone("3:30"), "registry: focusGone true for a closed conn");
-  reg.evict(2000 + 21000);
-  eq(reg.snapshot().groups.length, 0, "registry: closed conn evicted after grace");
+  reg.evict(2000 + 21000); // well past the old 20s grace
+  eq(reg.snapshot().groups.length, 1, "registry: a closed conn is kept (data stays inspectable)");
+  reg.evict(2000 + 1_800_001); // past the idle retention window
+  eq(reg.snapshot().groups.length, 0, "registry: closed conn evicted once it idles past retention");
 }
 {
   // truncated is a capture artifact, orthogonal to status: the conn stays "open"
