@@ -13,6 +13,7 @@
 #pragma clang diagnostic pop
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <bpf/bpf_core_read.h>
 
 /* wssnoop — tap the plaintext that an OpenSSL-linked process hands to /
  * gets back from the TLS layer, so userspace can decode the WebSocket
@@ -42,15 +43,19 @@
 #define DIR_READ  0       /* ingress: bytes coming up out of SSL_read  */
 #define DIR_WRITE 1       /* egress:  bytes going down into SSL_write  */
 
+#define TRANSPORT_TLS 0   /* captured at the OpenSSL boundary (wss://)   */
+#define TRANSPORT_TCP 1   /* captured at the plain TCP boundary (ws://)  */
+
 struct ssl_event {
     __u64 ts;
-    __u64 ssl;        /* SSL* — opaque per-connection id */
+    __u64 ssl;        /* SSL* (TLS) or struct sock* (TCP) — opaque per-connection id */
     __u32 pid;        /* tgid (userspace pid) */
     __u32 tid;        /* pid  (userspace tid) */
-    __u32 len;        /* full plaintext length of this SSL call */
+    __u32 len;        /* full plaintext length of this call */
     __u32 cap_len;    /* bytes actually copied into data[] (<= len) */
     __u8  dir;        /* DIR_READ | DIR_WRITE */
-    __u8  _pad[3];
+    __u8  transport;  /* TRANSPORT_TLS | TRANSPORT_TCP */
+    __u8  _pad[2];
     __u8  data[CHUNK];
 };
 
@@ -78,6 +83,16 @@ struct {
     __uint(max_entries, 10240);
 } active_reads SEC(".maps");
 
+/* The same carry-the-buffer trick for tcp_recvmsg (the plaintext recv path). A
+ * separate map from active_reads so an SSL_read and a tcp_recvmsg on one thread
+ * can't clobber each other. */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u64);
+    __type(value, struct read_args);
+    __uint(max_entries, 10240);
+} active_tcp_reads SEC(".maps");
+
 /* User-writable capture filter — the user->kernel control path. JS writes two
  * slots live (yeet:bpf ArrayMap.update): slot 0 a focus SSL*, slot 1 a focus
  * pid. When a slot is nonzero, only matching events are emitted; zero (the
@@ -86,14 +101,25 @@ struct {
  * production node, zero overhead for the rest" story. */
 #define FOCUS_SSL 0
 #define FOCUS_PID 1
+#define FOCUS_TCP 2   /* plaintext-TCP capture enable (0 = off, the default) */
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
     __type(value, __u64);
-    __uint(max_entries, 2);
+    __uint(max_entries, 3);
 } focus SEC(".maps");
 
-static __always_inline void emit(__u64 ssl, __u64 buf, __u32 len, __u8 dir)
+/* Plaintext TCP capture (ws://) is off unless the user asks for it: the kprobes
+ * below fire host-wide on every tcp_sendmsg/recvmsg, so gate emission on a flag
+ * JS sets only with --plaintext. Cheap (one array lookup) when off. */
+static __always_inline int tcp_enabled(void)
+{
+    __u32 k = FOCUS_TCP;
+    __u64 *v = bpf_map_lookup_elem(&focus, &k);
+    return v && *v;
+}
+
+static __always_inline void emit(__u64 ssl, __u64 buf, __u32 len, __u8 dir, __u8 transport)
 {
     if (len == 0)
         return;
@@ -118,7 +144,8 @@ static __always_inline void emit(__u64 ssl, __u64 buf, __u32 len, __u8 dir)
     e->tid = (__u32) id;
     e->len = len;
     e->dir = dir;
-    e->_pad[0] = e->_pad[1] = e->_pad[2] = 0;
+    e->transport = transport;
+    e->_pad[0] = e->_pad[1] = 0;
 
     /* Clamp then mask so the verifier sees a bounded copy length. */
     __u32 cap = len;
@@ -141,7 +168,7 @@ SEC("uprobe")
 int BPF_KPROBE(probe_ssl_write, void *ssl, const void *buf, int num)
 {
     if (num > 0)
-        emit((__u64) ssl, (__u64) buf, (__u32) num, DIR_WRITE);
+        emit((__u64) ssl, (__u64) buf, (__u32) num, DIR_WRITE, TRANSPORT_TLS);
     return 0;
 }
 
@@ -168,7 +195,102 @@ int BPF_KRETPROBE(probe_ssl_read_exit, int ret)
     bpf_map_delete_elem(&active_reads, &id);
 
     if (ret > 0)
-        emit(ssl, buf, (__u32) ret, DIR_READ);
+        emit(ssl, buf, (__u32) ret, DIR_READ, TRANSPORT_TLS);
+    return 0;
+}
+
+/* ---- plaintext TCP (ws://) ----------------------------------------------
+ *
+ * Non-TLS WebSocket data rides a plain TCP socket: no SSL_* to hook, so tap the
+ * kernel's tcp_sendmsg / tcp_recvmsg instead. `struct sock *sk` is the stable
+ * per-connection id (the TCP analogue of SSL*). The payload lives in the user
+ * iovec behind msg->msg_iter; we read its first segment (covers the single-iov
+ * common case for both ITER_UBUF and ITER_IOVEC). These fire host-wide, so they
+ * no-op unless --plaintext set the enable flag (tcp_enabled). */
+
+/* First data byte the iter points at: ITER_UBUF carries a bare user pointer;
+ * ITER_IOVEC an array whose first element we follow. Other iter types (kvec /
+ * bvec, kernel-internal) aren't user sendmsg/recvmsg payloads — skip them. */
+static __always_inline __u64 iter_base(struct msghdr *msg)
+{
+    /* Copy the embedded iov_iter out, then read its (anonymous-union) members
+     * locally — a comma-chain BPF_CORE_READ can't walk an embedded struct. */
+    struct iov_iter it;
+    if (bpf_core_read(&it, sizeof(it), &msg->msg_iter))
+        return 0;
+    if (it.iter_type == 0 /* ITER_UBUF */)
+        return (__u64) it.ubuf;
+    if (it.iter_type == 1 /* ITER_IOVEC */) {
+        struct iovec iov;
+        if (bpf_core_read(&iov, sizeof(iov), it.__iov))
+            return 0;
+        return (__u64) iov.iov_base;
+    }
+    return 0;
+}
+
+/* int tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size) — the
+ * plaintext is in the user iovec at entry, same as SSL_write. A single send is
+ * often scattered across several iovec segments (a corked WebSocket frame
+ * arrives as separate header + payload segments), so emit ONE event per segment
+ * rather than concatenating in-kernel: each goes through the same fixed-offset
+ * emit() (the verifier balks at variable-offset ringbuf writes), and the JS
+ * stream decoder reassembles the segments back into frames per connection. */
+SEC("kprobe/tcp_sendmsg")
+int BPF_KPROBE(probe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, __u64 size)
+{
+    if (!tcp_enabled() || (long) size <= 0)
+        return 0;
+    struct iov_iter it;
+    if (bpf_core_read(&it, sizeof(it), &msg->msg_iter))
+        return 0;
+    if (it.iter_type == 0 /* ITER_UBUF */) {
+        emit((__u64) sk, (__u64) it.ubuf, (__u32) it.count, DIR_WRITE, TRANSPORT_TCP);
+        return 0;
+    }
+    if (it.iter_type != 1 /* only plain ITER_IOVEC */)
+        return 0;
+    const struct iovec *iov = it.__iov;
+    __u64 nr = it.nr_segs;
+#pragma unroll
+    for (int i = 0; i < 8; i++) {
+        if ((__u64) i >= nr)
+            break;
+        struct iovec v;
+        if (bpf_core_read(&v, sizeof(v), &iov[i]))
+            break;
+        if (v.iov_len)
+            emit((__u64) sk, (__u64) v.iov_base, (__u32) v.iov_len, DIR_WRITE, TRANSPORT_TCP);
+    }
+    return 0;
+}
+
+/* int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, ...) — the
+ * dest buffer is filled by return, so stash (sk, buf) at entry and copy it on
+ * the return probe with the byte count, mirroring SSL_read. */
+SEC("kprobe/tcp_recvmsg")
+int BPF_KPROBE(probe_tcp_recvmsg_enter, struct sock *sk, struct msghdr *msg)
+{
+    if (!tcp_enabled())
+        return 0;
+    __u64 id = bpf_get_current_pid_tgid();
+    struct read_args a = { .ssl = (__u64) sk, .buf = iter_base(msg) };
+    if (a.buf)
+        bpf_map_update_elem(&active_tcp_reads, &id, &a, BPF_ANY);
+    return 0;
+}
+
+SEC("kretprobe/tcp_recvmsg")
+int BPF_KRETPROBE(probe_tcp_recvmsg_exit, int ret)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    struct read_args *a = bpf_map_lookup_elem(&active_tcp_reads, &id);
+    if (!a)
+        return 0;
+    __u64 sk = a->ssl, buf = a->buf;
+    bpf_map_delete_elem(&active_tcp_reads, &id);
+    if (ret > 0)
+        emit(sk, buf, (__u32) ret, DIR_READ, TRANSPORT_TCP);
     return 0;
 }
 

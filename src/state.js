@@ -34,7 +34,7 @@
 import { computed, from, signal } from "yeet:tui";
 
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
-import { createDecoder, DIR_WRITE } from "./lib/decode.js";
+import { createDecoder, DIR_WRITE, TRANSPORT_TCP } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
 import { focusKey, clearFocus, selectedConn } from "./controls.js";
 
@@ -97,15 +97,17 @@ const shortId = (ssl) => {
  * verb on the start line) on its egress stream (DIR_WRITE); the *server* sees
  * that same request arrive on its ingress (DIR_READ). The `HTTP/1.1 101`
  * response is not a request line, so it never matches HTTP_REQUEST and leaves
- * role/dest untouched. dest for the client is reconstructed wss://host/path
- * from the Host header + the request-target on the start line. */
+ * role/dest untouched. dest for the client is reconstructed scheme://host/path
+ * from the Host header + the request-target on the start line; the scheme is
+ * ws:// when the bytes came from the plain-TCP tap, wss:// from the TLS tap. */
 function deriveRoleDest(hs) {
   const m = HTTP_REQUEST.exec(hs.startLine || "");
   if (!m) return null; // a 101 response or anything non-request: don't infer
   if (hs.dir === DIR_WRITE) {
     const path = (hs.startLine.split(/\s+/)[1] || "/").trim();
     const host = (hs.headers && hs.headers.host) || "?";
-    return { role: "client", dest: `wss://${host}${path}` };
+    const scheme = hs.transport === TRANSPORT_TCP ? "ws" : "wss";
+    return { role: "client", dest: `${scheme}://${host}${path}` };
   }
   return { role: "server", dest: "?" };
 }
@@ -406,7 +408,7 @@ export function createRegistry({ onDrop } = {}) {
   return { ingest, evict, snapshot, focusGone };
 }
 
-export function createSession({ bin, pid, debug = false } = {}) {
+export function createSession({ bin, pid, debug = false, plaintext = false } = {}) {
   const groups = signal([]);
   const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
@@ -490,6 +492,7 @@ export function createSession({ bin, pid, debug = false } = {}) {
     const session = snoop({
       bin,
       pid,
+      plaintext,
       onEvent,
       onBin: (t) => (boundBin = t),
       onError: (e) => status.set(`tap fault: ${e && e.message ? e.message : e}`),

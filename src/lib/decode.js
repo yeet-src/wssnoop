@@ -37,6 +37,9 @@ import { Inflater } from "yeet:compression";
 export const DIR_READ = 0; /* ingress, server -> client (unmasked) */
 export const DIR_WRITE = 1; /* egress,  client -> server (masked)   */
 
+export const TRANSPORT_TLS = 0; /* captured at the OpenSSL boundary (wss://)  */
+export const TRANSPORT_TCP = 1; /* captured at the plain TCP boundary (ws://) */
+
 /* A frame length beyond this is taken as stream desync, not a real frame — it
  * bounds memory against a corrupt/mid-stream length (well above any real WS
  * message; the BPF tap itself caps a single SSL call at 16 KB). */
@@ -339,7 +342,7 @@ export function createDecoder({ debug = false } = {}) {
   /* Keyed by `${pid}:${ssl}:${dir}` — each direction is its own stream. */
   const conns = new Map();
 
-  const ctx = (e) => ({ pid: e.pid, tid: e.tid, ssl: e.ssl, dir: e.dir, ts: e.ts });
+  const ctx = (e) => ({ pid: e.pid, tid: e.tid, ssl: e.ssl, dir: e.dir, ts: e.ts, transport: e.transport });
   const ev = (e, extra) => ({ ...ctx(e), ...extra });
   const dbg = (e, s, stage) =>
     ev(e, { type: "debug", stage, bufLen: s.buf.length, head: s.buf.slice(0, 16) });
