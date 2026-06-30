@@ -211,6 +211,32 @@ export function createRegistry({ onDrop } = {}) {
     }
   };
 
+  /* SSL* reuse: a new connection has taken over the `pid:ssl` slot of an old
+   * one (the decoder emits a "reset"). If the old conn carried WebSocket data,
+   * keep it — re-key it out of the live slot so the new conn can claim it, mark
+   * it closed, and its scrollback stays inspectable (evicted later by the idle
+   * rule like any closed conn). A conn that never upgraded has nothing to keep,
+   * so it's simply dropped. */
+  let archiveSeq = 0;
+  const recycleConn = (key, now) => {
+    const c = conns.get(key);
+    if (!c) return;
+    if (!(c.msgs.total > 0 || c.role !== "?")) return dropConn(key);
+    conns.delete(key);
+    onDrop?.(key); /* decoder forgets the old stream; the new conn rebuilds it */
+    const g = groups.get(c.pid);
+    g?.conns.delete(key);
+    c.key = `${key}#${++archiveSeq}`;
+    if (c.status !== "closed") {
+      c.status = "closed";
+      c.closedAt = now;
+      c.closeReason = c.closeReason || "recycled (socket reused for a new connection)";
+    }
+    conns.set(c.key, c);
+    g?.conns.set(c.key, c);
+    memberVersion += 1;
+  };
+
   /* Record `bytes` of flow in direction `dir` across conn / process / global
    * histograms at time `now`. */
   const addFlow = (c, g, now, dir, bytes) => {
@@ -232,9 +258,10 @@ export function createRegistry({ onDrop } = {}) {
       return;
     }
 
-    /* SSL* address reuse: the old conn is gone, start clean. */
+    /* SSL* address reuse: the old conn is gone. Archive it (keep its data) if it
+     * carried WebSocket traffic, then start clean for the new connection. */
     if (rec.type === "reset") {
-      dropConn(key);
+      recycleConn(key, now);
       return;
     }
 

@@ -262,6 +262,27 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(reg.snapshot().groups.length, 0, "registry: closed conn evicted once it idles past retention");
 }
 {
+  // SSL* reuse (reset): archive the old conn (keep its data) beside the fresh
+  // one that takes over the live pid:ssl slot.
+  const reg = createRegistry();
+  reg.ingest({ type: "message", pid: 5, ssl: 50n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1000);
+  reg.ingest({ type: "reset", pid: 5, ssl: 50n, dir: DIR_READ }, 1100);
+  reg.ingest({ type: "message", pid: 5, ssl: 50n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 9 } }, 1200);
+  const conns = reg.snapshot().groups[0].conns;
+  eq(conns.length, 2, "registry: recycle keeps the old conn beside the new one");
+  const archived = conns.find((c) => c.status === "closed");
+  const live = conns.find((c) => c.status === "open");
+  ok(archived && archived.key.includes("#"), "registry: archived conn re-keyed out of the live slot");
+  ok(archived && archived.msgs.total === 1, "registry: archived conn kept its scrollback");
+  eq(live?.key, "5:50", "registry: the new conn holds the live pid:ssl key");
+
+  // a reset before any WebSocket data has nothing to keep → just dropped
+  const reg2 = createRegistry();
+  reg2.ingest({ type: "truncated", pid: 7, ssl: 70n, dir: DIR_READ, capLen: 4096, len: 9000 }, 1);
+  reg2.ingest({ type: "reset", pid: 7, ssl: 70n, dir: DIR_READ }, 2);
+  eq(reg2.snapshot().groups.length, 0, "registry: recycle drops a conn that never carried WS data");
+}
+{
   // truncated is a capture artifact, orthogonal to status: the conn stays "open"
   // but is flagged, and focus releases (the decoder can't follow it anymore)
   const reg = createRegistry();
