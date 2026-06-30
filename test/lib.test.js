@@ -283,6 +283,16 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(reg2.snapshot().groups.length, 0, "registry: recycle drops a conn that never carried WS data");
 }
 {
+  // the inspected conn is pinned: it survives eviction while you're looking at it
+  const reg = createRegistry();
+  reg.ingest({ type: "message", pid: 8, ssl: 80n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: 5 } }, 1000);
+  const conn = reg.snapshot().groups[0].conns[0];
+  reg.evict(1000 + 200_000, conn); // well past retention, but pinned
+  eq(reg.snapshot().groups.length, 1, "registry: a pinned (inspected) conn survives past retention");
+  reg.evict(1000 + 200_000, null); // no longer inspected
+  eq(reg.snapshot().groups.length, 0, "registry: once unpinned it evicts");
+}
+{
   // truncated is a capture artifact, orthogonal to status: the conn stays "open"
   // but is flagged, and focus releases (the decoder can't follow it anymore)
   const reg = createRegistry();

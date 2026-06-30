@@ -36,11 +36,12 @@ import { computed, from, signal } from "yeet:tui";
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
-import { focusKey, clearFocus } from "./controls.js";
+import { focusKey, clearFocus, selectedConn } from "./controls.js";
 
-/* Idle eviction matches the max viz range — a conn silent longer than the
- * longest sparkline window can show carries no visible data, so drop it. */
-const RETENTION_MS = 1_800_000; // 30 min == the longest viz window (900 buckets * 2s)
+/* Idle eviction: a conn silent this long is dropped to free its scrollback. We
+ * keep it short — closed/recycled conns shouldn't hoard memory — and instead
+ * pin whatever the user is currently inspecting so it survives while open. */
+const RETENTION_MS = 120_000; // 2 min
 const HEARTBEAT_MS = 500;
 
 /* Hard memory backstop on top of idle eviction (a pathological host could open
@@ -344,19 +345,26 @@ export function createRegistry({ onDrop } = {}) {
     }
   }
 
-  /* Drop conns idle past retention, then enforce the hard caps. Returns nothing
-   * — mutates the registry. Called from the heartbeat before snapshotting. */
-  function evict(now) {
+  /* Drop conns idle past retention, then enforce the hard caps. `pinned` is the
+   * conn the user is currently inspecting (by identity): it's never evicted, so
+   * a connection you're reading stays put even after it closes and ages out.
+   * Returns nothing — mutates the registry. Called from the heartbeat. */
+  function evict(now, pinned = null) {
     /* Snapshot keys before deleting — don't mutate the Map mid-iteration. A
-     * closed conn is kept (its decoded messages stay inspectable), evicted by
-     * the same idle rule as any other — its lastActiveAt froze at the close, so
-     * it drops one retention window later, not on a short grace timer. */
+     * closed conn is kept just like any other until it idles past retention;
+     * its lastActiveAt froze at the close, so it drops a retention window later
+     * (unless it's the one being inspected). */
     for (const [key, c] of [...conns]) {
-      if (now - c.lastActiveAt > RETENTION_MS) dropConn(key);
+      if (c !== pinned && now - c.lastActiveAt > RETENTION_MS) dropConn(key);
     }
     if (conns.size > MAX_CONNS) {
+      let excess = conns.size - MAX_CONNS;
       const order = [...conns.values()].sort((a, b) => a.lastActiveAt - b.lastActiveAt);
-      for (let i = 0; i < conns.size - MAX_CONNS && i < order.length; i++) dropConn(order[i].key);
+      for (let i = 0; excess > 0 && i < order.length; i++) {
+        if (order[i] === pinned) continue;
+        dropConn(order[i].key);
+        excess--;
+      }
     }
     if (groups.size > MAX_GROUPS) {
       const order = [...groups.values()].sort((a, b) => a.conns.size - b.conns.size);
@@ -443,7 +451,7 @@ export function createSession({ bin, pid, debug = false } = {}) {
        * no message). Catch it, surface it on the status line, and keep ticking. */
       try {
         const now = Date.now();
-        reg.evict(now);
+        reg.evict(now, selectedConn.get()); /* pin the conn being inspected */
         /* If the focused connection has closed/recycled/evicted, the kernel
          * filter would silence *everything* — release focus so the table
          * doesn't look frozen. */
