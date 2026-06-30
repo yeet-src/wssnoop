@@ -12,6 +12,7 @@ import { createRegistry } from "../src/state.js";
 import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
+import { compile } from "../src/lib/query.js";
 
 let pass = 0;
 let fail = 0;
@@ -302,6 +303,52 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(c.status, "open", "registry: truncation does not clobber status");
   ok(c.truncated, "registry: truncation sets the orthogonal flag");
   ok(reg.focusGone("5:50"), "registry: focusGone true for a truncated conn");
+}
+
+/* ==== query (message filter language) ================================ */
+{
+  const m = (q, text) => compile(q).test({ text });
+  // plain text is an unsplit substring (original behaviour), case-insensitive
+  ok(m("hello", "well hello there"), "query: plain substring matches");
+  ok(m("HELLO", "say hello"), "query: plain substring is case-insensitive");
+  ok(!m("xyz", "abc"), "query: plain substring miss");
+  ok(m("", "anything"), "query: empty query matches everything");
+
+  const trade = '{"type":"trade","price":150,"sym":"BTC-USD","tags":["a"]}';
+  const quote = '{"type":"quote","price":50.5}';
+  // numeric comparisons
+  ok(m("$.price > 100", trade), "query: > matches");
+  ok(!m("$.price > 100", quote), "query: > excludes");
+  ok(m("$.price>=50.5", quote), "query: >= with glued op + float");
+  ok(m("$.price < 100", quote), "query: < matches");
+  ok(!m("$.price <= 49", quote), "query: <= excludes");
+  // typed equality
+  ok(m('$.type == "trade"', trade), "query: == string (quoted)");
+  ok(m("$.type==trade", trade), "query: == string (bareword, glued)");
+  ok(!m('$.type == "trade"', quote), "query: == excludes");
+  ok(m("$.price != 1", trade), "query: != matches");
+  ok(!m("$.price != 150", trade), "query: != excludes on equal");
+  // substring on a field, and nested / indexed paths
+  ok(m("$.sym ~ usd", trade), "query: ~ field substring, case-insensitive");
+  ok(m("$.tags[0] == a", trade), "query: [n] index path");
+  ok(!m("$.tags[1]", trade), "query: presence false for missing index");
+  // presence
+  ok(m("$.sym", trade), "query: presence matches a present field");
+  ok(!m("$.error", trade), "query: presence false for absent field");
+  // absent field never matches a comparison (not even !=)
+  ok(!m("$.missing > 0", trade), "query: absent field fails numeric compare");
+  ok(!m("$.missing != 5", trade), "query: absent field fails !=");
+  // conjunction: every term must hold
+  ok(m("$.price > 100 BTC", trade), "query: field AND text both hold");
+  ok(!m("$.price > 100 ETH", trade), "query: AND fails when text term misses");
+  ok(!m("$.price > 200 BTC", trade), "query: AND fails when field term misses");
+  // explicit encoding prefix resolves the same as the default
+  ok(m("$json.price > 100", trade), "query: explicit $json prefix");
+  // non-JSON body: field terms simply don't match, text still does
+  ok(!m("$.price > 0", "not json"), "query: field test on non-JSON misses");
+  ok(m("json", "not json here"), "query: text term still works on non-JSON");
+  // a literal $ that isn't an accessor degrades to text
+  ok(m("$5", "it costs $5"), "query: bare $ token falls back to text");
 }
 
 /* ---- summary -------------------------------------------------------- */

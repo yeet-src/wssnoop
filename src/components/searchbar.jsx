@@ -18,11 +18,19 @@ export default function SearchBar() {
           const q = search.get();
           if (!active && !q) return "";
           const scope = isInspecting() ? "messages" : "connections";
+          /* In the message log the query is a field language, not just text;
+           * teach the syntax while the box is empty so it's discoverable. */
+          const hint =
+            isInspecting() && !q
+              ? "  text, or a field test: $.price>100  ·  $.type==\"trade\"  ·  $.error"
+              : active
+                ? "   enter: keep · esc: clear"
+                : "   esc: clear";
           return [
             pipe(`  /${scope} `, fg(COL.accent), bold),
             fg(COL.ink)(q),
             active ? fg(COL.accent)("▏") : "",
-            fg(COL.header)(active ? "   enter: keep · esc: clear" : "   esc: clear"),
+            fg(COL.header)(hint),
           ];
         }}
       </Text>

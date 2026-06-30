@@ -17,7 +17,7 @@
  * liveness. View-state (scroll/expand/freeze) lives in controls.js so it
  * survives a close/reopen cleanly; `inspect` resets it for a new connection. */
 
-import { Box, Text, Layer, bold, italic, fg } from "yeet:tui";
+import { Box, Text, Layer, bold, italic, fg, computed } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
 import Button from "./button.jsx";
@@ -26,6 +26,7 @@ import { hoverTip, hoverBg } from "./hover.js";
 import { COL, roleColor, jsonColor } from "../palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
+import { compile } from "../lib/query.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import { destOf, destTip, peerInfo } from "../probes/peers.js";
 import {
@@ -35,7 +36,6 @@ import {
   tip,
   flash,
   search,
-  matches,
   inspectScroll as scroll,
   inspectExpanded as expanded,
   inspectFrozen as frozen,
@@ -49,8 +49,13 @@ import {
   isFocused,
 } from "../controls.js";
 
-/* Everything a free-text query tests a message against (text is the JSON). */
+/* Everything a plain-text term tests a message against (text is the JSON). */
 const searchable = (rec) => `${rec.name} ${rec.text ?? ""}${rec.inflateError ?? ""}`;
+
+/* The compiled query predicate, recompiled only when the query changes. Plain
+ * text is a substring over `searchable`; `$.path OP value` terms test the
+ * decoded JSON body (see lib/query.js). */
+const matcher = computed(() => compile(search.get(), { text: searchable }));
 
 /* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */
 const copy = (text, note) => {
@@ -179,8 +184,8 @@ export default function Inspector({ groups, now, size }) {
    * "filter then copy" exports exactly the matching subset. */
   const currentMsgs = () => {
     const base = frozen.get() ? snap.get() : liveList();
-    const q = search.get();
-    return q ? base.filter((r) => matches(searchable(r), q)) : base;
+    const m = matcher.get();
+    return m.terms.length ? base.filter(m.test) : base;
   };
   const copyAll = () => {
     const m = currentMsgs();
