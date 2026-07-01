@@ -47,10 +47,9 @@ export default function Root({ size, groups, global, stats, status, clock }) {
        <Layer>
         <Box width="1fr" height="1fr" overflow="hidden">
         {() => {
-          /* The inspector is a full-screen view, not an overlay: while it's open
-           * the table isn't rendered at all (a higher-z box doesn't reliably
-           * occlude the text/sparklines beneath it — see YEET-DX-NOTES.md #20),
-           * so swap rather than stack. */
+          /* The inspector is a full-screen view by design (the wide JSON payloads
+           * want the room): while it's open the table isn't rendered at all — a
+           * swap, not a stack. */
           if (isInspecting()) return null;
           /* Membership level: role is fixed once a conn handshakes, so the role
            * filter and the empty-group drop belong here (rebuild on toggle, not
