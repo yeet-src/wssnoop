@@ -66,10 +66,8 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           below at narrow widths. The row itself clips (overflow="hidden") so a
           too-narrow terminal drops the rightmost controls instead of garbling. */}
       <Box direction="row" height={1} gap={1} overflow="hidden">
-        {/* identity + status + counts as ONE run: adjacent auto-width boxes
-            don't reliably keep their gap (a box around a dynamic thunk
-            under-measures its right edge), so spacing is explicit inside one
-            Text instead. */}
+        {/* identity + status + counts as ONE Text run, with the spacing baked in
+            — simpler than three boxes with a gap for a static three-part label. */}
         <Box break="none" bg={COL.bg} {...tip("wssnoop · uprobe tap status · open WebSocket connections · messages decoded")}>
           <Text break="none">
             {() => [
@@ -78,11 +76,6 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             ]}
           </Text>
         </Box>
-        {/* Help button — kept on the left, before the 1fr spacer, so it's always
-            visible: the right control cluster still clips its tail at narrow
-            widths (a fit cluster beside a 1fr spacer under-measures — a separate
-            layout bug from the now-fixed gap-in-fit one; see YEET-DX-NOTES #23). */}
-        <Button title="help (?) · what everything means and the keys" onClick={toggleHelp}>?</Button>
         {/* capture-focus indicator: visible only when the kernel filter is
             pinned to one connection; click to release. */}
         <Box
@@ -104,8 +97,11 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
         <Box width="1fr" />
         {/* the controls ride in one opaque cluster (bg + its own gaps), so a
             too-narrow row slides it left to clip the title cleanly rather than
-            letting the title bleed up through the gaps between buttons. */}
-        <Box direction="row" gap={1} bg={COL.bg} break="none">
+            letting the title bleed up through the gaps between buttons.
+            width="fit": a Box defaults to fr(1), which would split the row's flex
+            with the 1fr spacer and starve the cluster below its content (clipping
+            the tail); fit packs it to its true width and the spacer takes the slack. */}
+        <Box width="fit" direction="row" gap={1} bg={COL.bg} break="none">
           <Button
             title={titles.search}
             onClick={startSearch}
@@ -130,6 +126,7 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
             {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
           </Text>
           <Button title={titles.vizUp} onClick={() => cycleViz(1)}>›</Button>
+          <Button title="help (?) · what everything means and the keys" onClick={toggleHelp}>?</Button>
         </Box>
       </Box>
 
