@@ -126,9 +126,8 @@ export const closeInspector = () => {
 export const isInspecting = () => selected.get() != null;
 
 /* ---- help screen ----------------------------------------------------- */
-/* A full-body explanatory screen (a swap, not a z-overlay — see the inspector
- * for why a stacked box can't occlude the sparklines beneath). `?` toggles it;
- * Esc / the back button close it. It hides the table and inspector while open. */
+/* A modal overlay (scrim + centered panel, see help.jsx) drawn on top of
+ * whatever's showing. `?` toggles it; Esc / the back button close it. */
 export const helpOpen = signal(false);
 export const toggleHelp = () => helpOpen.update((v) => !v);
 export const closeHelp = () => helpOpen.set(false);
