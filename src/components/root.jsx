@@ -35,8 +35,11 @@ export default function Root({ size, groups, global, stats, status, clock }) {
    * and resetting its per-node state; a computed only recomputes when
    * `selected` flips, so the element reference is stable and it mounts once. */
   const inspector = computed(() =>
-    selected.get() != null && !helpOpen.get() ? <Inspector groups={groups} now={clock} size={size} /> : null,
+    selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null,
   );
+  /* Help is a modal overlay (scrim + centered panel) on top of whatever's
+   * showing; memoized so it mounts once when opened, not per heartbeat. */
+  const help = computed(() => (helpOpen.get() ? <Help size={size} /> : null));
   return (
     <Box direction="column" width="1fr" height="1fr" bg={COL.bg}>
       <Toolbar global={global} stats={stats} status={status} now={clock} span={vizRange} sizeSig={size} />
@@ -44,12 +47,10 @@ export default function Root({ size, groups, global, stats, status, clock }) {
        <Layer>
         <Box width="1fr" height="1fr" overflow="hidden">
         {() => {
-          /* Help and the inspector are full-screen views, not overlays: while
-           * either is open the table isn't rendered at all (a higher-z box
-           * doesn't reliably occlude the text/sparklines beneath it — see
-           * YEET-DX-NOTES.md #20), so swap rather than stack. Help wins over the
-           * inspector (it's the topmost thing you can open). */
-          if (helpOpen.get()) return <Help />;
+          /* The inspector is a full-screen view, not an overlay: while it's open
+           * the table isn't rendered at all (a higher-z box doesn't reliably
+           * occlude the text/sparklines beneath it — see YEET-DX-NOTES.md #20),
+           * so swap rather than stack. */
           if (isInspecting()) return null;
           /* Membership level: role is fixed once a conn handshakes, so the role
            * filter and the empty-group drop belong here (rebuild on toggle, not
@@ -166,6 +167,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
             />
           ) : null
         }
+        {help}
        </Layer>
       </Box>
       <SearchBar />

@@ -20,7 +20,7 @@ import { Box, CellBuffer, Effect, rgb } from "yeet:tui";
 
 import { heatFor, fmtBytes, fmtAgo } from "../lib/format.js";
 import {
-  isInspecting,
+  isInspecting, helpOpen,
   cursorFrac, cursorPinned, moveCursor, leaveCursor, toggleCursorPin,
 } from "../controls.js";
 
@@ -66,7 +66,7 @@ export default function Sparkline({ hist, now, span, width, originX = 0, variant
      * The table's bars (conn/agg) sit entirely under the inspector, so blank
      * them to spaces (transparent) while it's open. The global bar lives in the
      * toolbar, above the panel, so it keeps drawing. */
-    if (variant !== "global" && isInspecting()) {
+    if (variant !== "global" && (isInspecting() || helpOpen.get())) {
       for (let c = 0; c < w; c++) { chars[c] = 0x20; fg[c] = 0; bg[c] = 0; }
       cb.touch();
       return;
