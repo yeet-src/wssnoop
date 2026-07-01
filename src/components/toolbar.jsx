@@ -79,7 +79,9 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           </Text>
         </Box>
         {/* Help button — kept on the left, before the 1fr spacer, so it's always
-            visible (the right control cluster clips its tail at narrow widths). */}
+            visible: the right control cluster still clips its tail at narrow
+            widths (a fit cluster beside a 1fr spacer under-measures — a separate
+            layout bug from the now-fixed gap-in-fit one; see YEET-DX-NOTES #23). */}
         <Button title="help (?) · what everything means and the keys" onClick={toggleHelp}>?</Button>
         {/* capture-focus indicator: visible only when the kernel filter is
             pinned to one connection; click to release. */}

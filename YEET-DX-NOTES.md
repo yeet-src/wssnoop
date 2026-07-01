@@ -15,27 +15,6 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## yeet:tui / JSX
 
-### 1. The face combinators are deprecated, but every doc teaches them **[doc-gap]**
-- **Symptom:** We wrote `bold(fg(COL.title)("wssnoop"))` everywhere, straight
-  from the CLAUDE.md / AGENTS.md / README examples. All three guides use the
-  combinator form exclusively.
-- **Cause:** In the runtime, the blessed form is `<Text fg=… bold>…</Text>`; the
-  combinators are explicitly `@deprecated`, kept only for back-compat.
-  > `crates/common/src/v8/loader/rule/yeet/tui/module.js:388-396`
-  > ```js
-  > // @deprecated — the named face combinators. Use `<Text fg=… bold>…</Text>`,
-  > // or `face(patch)`. Kept working for back-compat.
-  > export const fg = c => face({ fg: c });
-  > export const [bold, dim, italic, …] = […].map(k => face({ [k]: true }));
-  > ```
-  > And line ~370: *"Its bare attrs are a face (`fg`/`bg` a colour, the rest an attr)."*
-- **Workaround:** Read the runtime source. There is no other signal — no console
-  warning, no lint, no types marking `@deprecated`.
-- **Suggested fix:** Update the three guides to lead with `<Text fg=… bold>` and
-  `face(patch)` for runtime-computed patches; demote the combinators to a
-  "deprecated, back-compat" footnote. Optionally emit a one-time dev-mode warning
-  when a combinator is called.
-
 ### 2. Multi-span styled text has no clean prop form
 - **Symptom:** A line like `[fg(out)("↑"), fg(dim)(n), fg(role)(name)]` (per-span
   colours inside one `<Text>`) can't be expressed with bare attrs — attrs style
@@ -45,18 +24,11 @@ reality · **[uncatchable]** can't be handled from JS.
   children — verbose for dense one-liners.
 - **Workaround:** Keep `face(patch)` (the non-deprecated escape hatch) for
   per-span runtime colours; reserve bare attrs for uniformly-styled nodes.
-- **Suggested fix:** Document this split explicitly: "uniform style → bare attrs;
-  per-span/dynamic → `face()`." Right now "use `<Text fg=… bold>`" reads as
-  *always*, which is impossible for the common multi-colour status line.
-
-### 3. Signals start at their initial value — every thunk runs once on empty
-- **Symptom:** First frame throws reading a field off a `null`/`[]` signal.
-- **Cause:** Producers (`from`) don't run until watched; the UI renders once
-  before data lands. (Documented as gotcha 11 — listed here because it bit anyway
-  and is the single most common crash-on-startup.)
-- **Workaround:** Guard every render thunk (`x?.field`, `if (!data) return …`).
-- **Suggested fix:** Nothing actionable beyond docs; a `from(producer, initial,
-  {placeholder})` that suspends children until first emit would remove the class.
+- **Suggested fix:** Nested <Text> should work to fix this... actually,
+wait, shouldn't this *already work*?? Verify it!
+- **Fixed:** Verified already working — nested `<Text fg=…>` array children
+  give per-span colours, each painting its own cell. Locked in with a
+  regression test (`a89f10d2`, branch `ben/dx-fixes-for-wssnoop`).
 
 ### 16. A text leaf wears its CONTAINER's `break`, not the `<Text>`'s **[silent]**
 - **Symptom:** `<Box {...tip}><Text break="none">{thunk}</Text></Box>` wrapped a
@@ -67,11 +39,9 @@ reality · **[uncatchable]** can't be handled from JS.
   had no `break`, so it defaulted to word-wrap — the inner `<Text break="none">`
   was ignored for wrapping. Nothing warns; it only shows when the box is forced
   narrow.
-- **Workaround:** Put `break="none"` on the **Box**, not (only) the `<Text>`; add
-  `overflow="hidden"` on the row so residual overflow clips instead of bleeding.
-- **Suggested fix:** Make `<Text break>` authoritative for its own run, or
-  document loudly that `break`/`overflow` are *container* concerns (the API note
-  says so in passing, but the failure mode — vertical bleed — is non-obvious).
+- **Suggested fix:** Make `<Text break>` authoritative for its own run
+- **Fixed:** `break`/`overflow` now split off the span face and ride the run to
+  the leaf it's promoted to, winning over the container's default (`f89eed21`).
 
 ### 21. A function `bg` (the `(x,y,w,h)=>color` shader) silently doesn't paint **[silent]**
 - **Symptom:** `<Box bg={(x,y,w,h)=>...}/>` rendered with **no fill** — the cells
@@ -83,14 +53,12 @@ reality · **[uncatchable]** can't be handled from JS.
   shader fn (not unwrapped like a signal), but the paint pass doesn't appear to
   invoke it (or expects a different arity/return). The docs advertise
   `bg: color | (x,y,w,h)=>color`, so this is a doc-vs-behavior gap at minimum.
-- **Workaround:** Don't compute a per-cell fill via the shader. Build the
-  gradient/segments from real boxes instead — wssnoop's overlay scrollbar is
-  three stacked boxes with `fr` weights (before/thumb/after) so it flexes to the
-  container's real height, each with a plain string `bg`. Static rgba strings
-  composite correctly over text (a translucent bg dims the glyph beneath), which
-  is the whole reason the shader wasn't needed.
-- **Suggested fix:** Either make the shader form actually paint, or drop it from
-  the `bg` docs/types so callers don't reach for it.
+- **Suggested fix:** Fix the shader functions, they seem to just be
+broken. Make sure there's a test so this doesn't regress again.
+- **Fixed:** Verified painting — a function `bg` reaches paint via `common()`'s
+  `color()` coercion and `baked()`, so it varies per cell (incl. the one-col
+  scrollbar). Locked in with a regression test (`81c23fa2`). If your build
+  showed no fill, it predates the wiring; rebuild the daemon.
 
 ### 20. A `CellBuffer` is not occluded by boxes drawn over it **[silent]**
 - **Symptom:** An opaque, higher-`z` `Box` (with `bg` + `border`) placed over a
@@ -104,14 +72,12 @@ reality · **[uncatchable]** can't be handled from JS.
   higher z wins (panel text occludes), but a **space** at higher z is treated as
   transparent, so the buffer's glyph below shows through. A `bg` color is not a
   glyph, so it never occludes the buffer.
-- **Workaround:** Don't rely on z-order to hide a buffer. Blank the buffer
-  itself (write `0x20` spaces) when it should be hidden — e.g. wssnoop blanks the
-  table's row/group sparklines while the inspector overlay is open, keeping only
-  the toolbar's bar (which is never covered). Alternatively, don't render the
-  buffer's subtree at all while it's occluded.
 - **Suggested fix:** Composite buffer planes within the normal z-stack so an
   opaque box's `bg` clears the cells beneath it (or expose an `opaque`/clear flag
   on the covering box).
+- **Fixed:** `paint`'s bg fills now occlude — a fully-covered opaque cell has its
+  glyph cleared; translucent/faded fills still only veil. The imperative
+  `tint`/`Buffer.tint` (veil-only) semantics are unchanged (`f584eaa5`).
 
 ### 22. A bare inline thunk child re-mounts its subtree every render pass **[silent]**
 - **Symptom:** A conditional child written as a bare thunk —
@@ -134,50 +100,58 @@ reality · **[uncatchable]** can't be handled from JS.
 - **Suggested fix:** Either memoize bare thunk children by referential equality
   of their result, or document that conditional/dynamic children belong in a
   `computed`, not a bare thunk.
+	(Yeah thunks -> computeds should always be memoized, if i'm understanding this issue right -- Ben)
+- **Fixed:** Bare thunk children (the array-child shape JSX gives multiple kids)
+  are now memoized to a stable `computed` keyed by fn identity, so the subtree
+  mounts once and its local signals persist across sibling re-projection
+  (`32ebe54a`).
+
+### 23. A fit-width flow row omits `gap` from its own width, clipping the tail **[silent]**
+- **Symptom:** A `<Box direction="row" gap=N>` sized `fit` under-reports its width
+  by `N*(children-1)`, so `overflow:hidden` clips the last child(ren). Worse next
+  to a `1fr` spacer, which over-grows into the phantom free space and shoves the
+  row off the right edge. Hit in wssnoop's toolbar: the `search sort role idle
+  rows ‹ win ›` cluster clipped `rows`/`win`/`?` at every width.
+- **Cause:** Pass-1 intrinsic measure folded children with a gap-less sum while
+  pass-2 layout inserts the gap, so a fit container's width = Σchildren but its
+  content occupies Σchildren + gap·(n−1).
+- **Workaround:** Moved the `?` button left of the `1fr` spacer, where layout is
+  stable.
+- **Fixed:** Source fixed in yeet master (`d41258ca`, "Handle gap in a tui layout
+  intrinsic computation") — flow mode folds with gaps; `overlap` still ignores
+  gap. Regression test at `layout/module.test.js` ("A fit stack reserves gap
+  between children, so its last child fits"). NB the dev VM daemon must be
+  rebuilt to carry it — a version-string bump does not imply the commit is in the
+  build. See `~/notes/yeet-tui-flow-gap-intrinsic-width.md`.
+- **Update 2026-07-01 (daemon now on 0.19.5 with the fix, verified live):** the
+  gap fix works for a plain fit row (`clip.jsx`: all gaps now fit). BUT the
+  toolbar still clips: a **fit cluster beside a `1fr` spacer** under-measures
+  independently of gap — the `1fr` over-grows into the phantom slack and shoves
+  the cluster off the right edge (reproduced live at 200 AND 280 cols, static or
+  thunk widths, gap-fix present). So this is a *second, still-open* layout bug;
+  the `?` button stays left of the spacer. Workaround if you need the cluster
+  right-aligned and complete: give it an explicit `width` (a fixed-width sibling
+  of a `1fr` is measured correctly) rather than relying on `fit`.
 
 ---
 
 ## Runtime / isolate
-
-### 4. A hard V8-worker death is uncatchable and paints over the screen **[uncatchable]**
-- **Memory cause FIXED on `ben/daemon-fixes`:** the `<1 min under load` death
-  was memory growth, now addressed — V8 GC never finalized for a timer-only TUI
-  so old-gen climbed to the ceiling (`22e05828` pump foreground tasks), and the
-  signal graph retained every unwatched sink (~33 MiB/min leak, `5c621ce7`).
-  Heap exhaustion is now a clean force-terminate + dispose (`78a7d6dc`,
-  `8ee4f26d`) rather than a hard worker death. (Re-verify under churn on the
-  rebuilt daemon — see the resolved note at the end.)
-- **Residual (still open):** a *genuine* native fault is still uncatchable —
-  there's no global `unhandledrejection` / `onerror` hook, so JS never sees it
-  and the watchdog respawn leaves a torn alt-screen. (See gotcha 12 for the
-  *catchable* sibling.)
-- **Workaround:** Catch at the two boundaries you own (`mount()` try/catch →
-  BSOD; wrap timer/subscription callbacks).
-- **Suggested fix:** Expose an opt-in `yeet.onWorkerFault(cb)` (even
-  best-effort, fired by the watchdog before respawn) so a script can repaint a
-  crash banner instead of leaving a torn alt-screen. At minimum, restore the
-  cursor/alt-screen on respawn.
-
-### 5. Redirecting stdout removes the `tty` global **[silent]**
-- **Symptom:** `yeet run … > out.log` → `ReferenceError: tty is not defined`,
-  far from the redirect that caused it.
-- **Cause:** `tty` is only injected when stdout is a pty. Redirecting (to tee
-  logs during a soak) drops it.
-- **Workaround:** Never redirect a TUI script's stdout. Redirect *stderr* only;
-  watch the daemon log for the rest.
-- **Suggested fix:** Still inject a `tty` shim when stdout isn't a pty (no-op
-  draws, real `tty.on` for input), or throw an explanatory error at startup:
-  "tty unavailable: stdout is not a terminal (did you redirect it?)".
 
 ### 6. No `Intl` / `TextDecoder` / `TextEncoder`
 - Documented (gotcha 1) but still the first wall every formatting/decoding task
   hits. `toLocaleString`, `localeCompare`, `Intl.*`, `new TextDecoder()` all
   throw. Hand-roll everything. *Suggested fix:* ship a minimal `TextDecoder`
   (`utf-8` at least) — byte→string is needed by virtually every BPF script.
+- **Fix**: Make sure yeet:text is at least minimally documented in ../docs.
+- **Fixed (docs):** `yeet:tui:text` now documented in ../docs — measurement,
+  wrapping/truncation, and `toUTF8`/`toUTF16`/`toUTF32` encoders; the runtime
+  reference's TextEncoder/TextDecoder note points there (docs `d369eb8`). The
+  runtime still ships no `TextDecoder`; the encoders cover string ↔ bytes.
 
 ---
 
 ## BPF
+	- DEFERED, don't work on this section rn.
 
 ### 7. Single-program `bpftool gen object` silently captures nothing **[silent]**
 - **Symptom:** An egress-only object built with one program (`-DEGRESS_ONLY`,
@@ -238,6 +212,7 @@ reality · **[uncatchable]** can't be handled from JS.
 ---
 
 ## Tooling / run mechanics
+DEFERRED
 
 ### 12. Bare `--bin node` won't attach; needs an absolute path
 - **Symptom:** `Could not resolve uprobe attach target: node`.
