@@ -430,7 +430,7 @@ export function createRegistry({ onDrop } = {}) {
 
 const emsg = (e) => (e && e.message ? e.message : e);
 
-export function createSession({ binWide = null, debug = false, plaintext = false } = {}) {
+export function createSession({ binWide = null, debug = false } = {}) {
   const groups = signal([]);
   const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0, msgUp: 0, msgDn: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
@@ -506,7 +506,6 @@ export function createSession({ binWide = null, debug = false, plaintext = false
       taps.set(pid, entry);
       snoop({
         pid,
-        plaintext,
         onEvent,
         onBin: (t) => ((entry.bin = t), refreshStatus()),
         onError: (e) => ((entry.err = emsg(e)), refreshStatus()),
@@ -547,7 +546,6 @@ export function createSession({ binWide = null, debug = false, plaintext = false
       const entry = { stop: () => {}, setFocus: null, bin: null };
       snoop({
         bin: binWide,
-        plaintext,
         onEvent,
         onBin: (t) => ((entry.bin = t), refreshStatus()),
         onError: (e) => status.set(`tap fault: ${emsg(e)}`),

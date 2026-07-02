@@ -24,7 +24,7 @@ const BIN_DIR = inBundle ? "../bin" : "../../bin";
  *
  *   const session = await snoop({ bin, pid, onEvent, onError });
  */
-export async function snoop({ bin, pid, onEvent, onError, onBin, plaintext = false }) {
+export async function snoop({ bin, pid, onEvent, onError, onBin }) {
   const probe = new BpfObject({
     exe: `${BIN_DIR}/probe.bpf.o`,
     base: import.meta.dirname,
@@ -41,7 +41,7 @@ export async function snoop({ bin, pid, onEvent, onError, onBin, plaintext = fal
 
   const control = await probe
     .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
-    .bind("focus", { kind: "array" }) // writable filter (slot 0 ssl, 1 pid, 2 tcp-enable)
+    .bind("focus", { kind: "array" }) // writable filter (slot 0 ssl, 1 pid)
     .attach("probe_ssl_write", { ...uprobe, symbol: "SSL_write" })
     .attach("probe_ssl_read_enter", { ...uprobe, symbol: "SSL_read" })
     .attach("probe_ssl_read_exit", { ...uprobe, symbol: "SSL_read" })
@@ -58,16 +58,6 @@ export async function snoop({ bin, pid, onEvent, onError, onBin, plaintext = fal
       if (onError) onError(err);
     }
   };
-
-  /* Plaintext ws:// capture is off by default (the tcp_sendmsg/recvmsg kprobes
-   * fire host-wide); flip the kernel enable flag only when the user asked. */
-  if (plaintext) {
-    try {
-      await focus.update(2, 1n);
-    } catch (err) {
-      if (onError) onError(err);
-    }
-  }
 
   const events = new RingBuf(control, "events");
   const sub = await events.subscribe(

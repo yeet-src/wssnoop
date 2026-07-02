@@ -1,0 +1,46 @@
+¶ (Do not commit this file).
+
+§ feedback / rqmts
+
+☑ search — the $.field query language now works in the TABLE, not just the
+  inspector: a field query annotates rather than hides, driving the match counts
+  below. Plain-text still filters connections by URL.
+☑ aggregation — bandwidth is the default per-node aggregate (↑/↓ on ALL + every
+  process/container header); the agg button / m toggles bandwidth ⇄ message
+  count. (controls.aggMetric, components/agg.jsx)
+☑ error detection — done via SEARCH as suggested, not a bespoke feature: a
+  $.field query (e.g. $.error) turns the per-node aggregate into matching / total
+  messages, live, flagged red when >0 — per service AND per connection row. So
+  "show error per service" = type $.error and watch the counts.
+
+¶ These are ecs services btw (relevant to the egress-cost concern above).
+
+☑ hardcoded support for standard binaries — no --bin/--pid now auto-discovers a
+  running node/deno/bun/python/ruby and traces its SSL binary; --bin is only for
+  extras. (probes/probe.js knownRuntimeBin / KNOWN_BINS)
+
+§ etc
+
+☑ show scrollbars only when active (like web overlay scrollbars) — the inspector
+  overlay scrollbar now fades ~1.2s after the last scroll gesture.
+☑ "Waiting for messages" copy is incorrect when connection is closed — now reads
+  "connection closed · no messages were captured".
+☐ colocate "copy" button wiht message json
+☐ message content as overlayed panel or something, not expanding inline
+  the scrollable table
+☐ improve proc details??
+☐ activity bar drag-2-resize really flaky
+☐ interactive picker for process (node arg)
+☐ pane is not resizable with mouse currently; but should be
+
+§ Ideas, not actionable yet
+
+¶ These things need fleshing out
+
+☐ BTOP-like keyboard shortcuts
+
+§ Notes
+
+¶ To watch console logs use:
+
+$ yeet attach -c $id

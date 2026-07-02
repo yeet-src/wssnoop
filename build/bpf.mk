@@ -24,20 +24,21 @@ ARCH    := $(UNAME_M:x86_64=x86)
 ARCH    := $(ARCH:aarch64=arm64)
 
 VMLINUX  := src/bpf/include/vmlinux.h
-# discover.bpf.c is a SEPARATE loadable object, not part of the tap: it holds
-# only kernel-global probes (tcp_connect/tcp_close), so it can load without the
-# tap's SSL uprobes — start() rejects an object with an unattached uprobe. Every
-# other src/bpf/*.bpf.c links into the one tap object.
-DISCOVER_SRC := src/bpf/discover.bpf.c
-BPF_SRCS := $(filter-out $(DISCOVER_SRC),$(wildcard src/bpf/*.bpf.c))
+# socket.bpf.c is a SEPARATE loadable object, not part of the SSL tap: it holds
+# only kernel-global probes (tcp_connect/close discovery + tcp_sendmsg/recvmsg
+# plaintext), so it can load without the tap's SSL uprobes — start() rejects an
+# object with an unattached uprobe. Every other src/bpf/*.bpf.c links into the
+# one SSL tap object.
+SOCKET_SRC := src/bpf/socket.bpf.c
+BPF_SRCS := $(filter-out $(SOCKET_SRC),$(wildcard src/bpf/*.bpf.c))
 # One intermediate object per unit. They live under .build/ so they are
 # never mistaken for the loadable object in bin/.
 BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
 # The linked objects. Their `.bpf.o` suffix is what the JS side loads (the
 # loader's BpfObjectRule matches on that suffix): probes/probe.js loads
-# probe.bpf.o, probes/netconn.js loads discover.bpf.o.
-BPF_OUT      := bin/probe.bpf.o
-DISCOVER_OUT := bin/discover.bpf.o
+# probe.bpf.o, probes/netconn.js loads socket.bpf.o.
+BPF_OUT    := bin/probe.bpf.o
+SOCKET_OUT := bin/socket.bpf.o
 
 BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/bpf/include
 # Add the vendored libbpf program headers (<bpf/bpf_helpers.h>, …) when a
@@ -45,7 +46,7 @@ BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/b
 # it, the build falls back to a host libbpf-dev on the default include path.
 BPF_CFLAGS += $(if $(BPF_SYSINCLUDE),-I$(BPF_SYSINCLUDE))
 
-bpf: $(BPF_OUT) $(DISCOVER_OUT)
+bpf: $(BPF_OUT) $(SOCKET_OUT)
 
 # `| toolchain` (order-only) ensures the vendored clang/bpftool are present in
 # the cache before any rule shells out to them, without forcing rebuilds.
@@ -64,9 +65,9 @@ $(BPF_OUT): $(BPF_OBJS) | bin toolchain
 	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
 	$(BPFTOOL) gen object $@ $(BPF_OBJS)
 
-# The discovery object stands alone (its one unit through `gen object` for the
+# The socket object stands alone (its one unit through `gen object` for the
 # same relocation handling libbpf does at load).
-$(DISCOVER_OUT): .build/bpf/discover.bpf.o | bin toolchain
+$(SOCKET_OUT): .build/bpf/socket.bpf.o | bin toolchain
 	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
 	$(BPFTOOL) gen object $@ $<
 
@@ -74,7 +75,7 @@ bin:
 	mkdir -p bin
 
 clean-bpf:
-	rm -rf $(BPF_OUT) $(DISCOVER_OUT) .build $(VMLINUX)
+	rm -rf $(BPF_OUT) $(SOCKET_OUT) .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a

@@ -13,7 +13,7 @@
 import { BpfObject, RingBuf } from "yeet:bpf";
 import { from } from "yeet:tui";
 
-// discover.bpf.o sits beside probe.bpf.o; same bundle-vs-source path dance as
+// socket.bpf.o sits beside probe.bpf.o; same bundle-vs-source path dance as
 // probe.js (bundled → src/index.jsx, dirname = src/, so ../bin).
 const inBundle = import.meta.filename.endsWith("/index.jsx");
 const BIN_DIR = inBundle ? "../bin" : "../../bin";
@@ -38,7 +38,7 @@ export const connections = from((state) => {
   const live = new Map(); // sk -> { sk, pid, family, addr, port, ts }
   let dirty = false;
 
-  const ctlP = new BpfObject({ exe: `${BIN_DIR}/discover.bpf.o`, base: import.meta.dirname })
+  const ctlP = new BpfObject({ exe: `${BIN_DIR}/socket.bpf.o`, base: import.meta.dirname })
     .bind("conns", { kind: "ringbuf", btf_struct: "conn_event" })
     .start();
 

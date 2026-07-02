@@ -67,9 +67,6 @@ const PID = args.pid != null ? Number(args.pid) : undefined;
  * never mistaken for a normal run option — the UI otherwise runs until quit. */
 const SECS = Number(args["testonly-exit-after-secs"] ?? 0); /* 0 = run until quit */
 const DEBUG = parseBool(args.debug ?? args.d);
-/* Also capture plaintext ws:// (non-TLS) by tapping tcp_sendmsg/recvmsg. Off by
- * default — those kprobes fire host-wide, so opt in when you need it. */
-const PLAINTEXT = parseBool(args.plaintext ?? args.ws);
 
 function parseBool(v) {
   if (v == null) return false;
@@ -144,7 +141,7 @@ if (PID == null && BIN == null) openBrowser();
 /* The session is a bundle of signals; the BPF taps attach when the view mounts
  * (the signals get watched), reconcile against the armed set, and detach when
  * it unmounts. */
-const session = createSession({ binWide: BIN_WIDE, debug: DEBUG, plaintext: PLAINTEXT });
+const session = createSession({ binWide: BIN_WIDE, debug: DEBUG });
 let teardown;
 try {
   teardown = mount((size) => <Root size={size} {...session} />);
