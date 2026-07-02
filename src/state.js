@@ -36,7 +36,7 @@ import { computed, from, signal } from "yeet:tui";
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE, TRANSPORT_TCP } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
-import { focusKey, clearFocus, selectedConn } from "./controls.js";
+import { focusKey, clearFocus, selectedConn, armedPids } from "./controls.js";
 
 /* Idle eviction: a conn silent this long is dropped to free its scrollback. We
  * keep it short — closed/recycled conns shouldn't hoard memory — and instead
@@ -250,6 +250,14 @@ export function createRegistry({ onDrop } = {}) {
     memberVersion += 1;
   };
 
+  /* Drop every conn of `pid` at once — used when a process is disarmed, so its
+   * rows leave the table immediately rather than idling out a window later. */
+  const dropPid = (pid) => {
+    const g = groups.get(pid);
+    if (!g) return;
+    for (const key of [...g.conns.keys()]) dropConn(key);
+  };
+
   /* Record `bytes` of flow in direction `dir` across conn / process / global
    * histograms at time `now`. */
   const addFlow = (c, g, now, dir, bytes) => {
@@ -417,58 +425,155 @@ export function createRegistry({ onDrop } = {}) {
     const c = conns.get(key);
     return !c || c.status === "closed" || c.truncated;
   };
-  return { ingest, evict, snapshot, focusGone };
+  return { ingest, evict, snapshot, focusGone, dropPid };
 }
 
-export function createSession({ bin, pid, debug = false, plaintext = false } = {}) {
+const emsg = (e) => (e && e.message ? e.message : e);
+
+export function createSession({ binWide = null, debug = false, plaintext = false } = {}) {
   const groups = signal([]);
   const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0, msgUp: 0, msgDn: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
   const clock = signal(Date.now());
   /* A one-line health string for the chrome: a blank dashboard with no status
    * reads as broken, so a failed attach / transport fault must say so rather
-   * than just showing zeros. "tracing" once the uprobes are live. */
+   * than just showing zeros. "tracing …" once the uprobes are live, an idle
+   * hint when nothing is armed. */
   const status = signal("starting…");
 
-  /* Bound to the UI observing the session: this `from` runs snoop -> decoder on
-   * first watch and detaches on last unwatch. Its own value is unused — folded
-   * state lands in the registry, published on the heartbeat. */
+  /* Bound to the UI observing the session: this `from` runs the taps -> decoder
+   * on first watch and detaches on last unwatch. Its own value is unused —
+   * folded state lands in the registry, published on the heartbeat. */
   const tap = from(() => {
     const decoder = createDecoder({ debug });
     const reg = createRegistry({ onDrop: (key) => decoder.drop(key) });
 
-    /* The probe's live capture-filter setter, once the attach resolves. The UI
-     * sets controls.focusKey (`${pid}:${ssl}` | null); we mirror it into the
-     * kernel here — the tap owns the probe session, so this control→kernel
-     * bridge belongs at this seam. */
-    let focusFn = null;
-    let lastFocus = undefined;
-    const syncFocus = () => {
-      if (!focusFn) return;
-      const key = focusKey.get();
-      if (key === lastFocus) return;
-      lastFocus = key;
-      if (key == null) {
-        focusFn({ ssl: 0n, pid: 0 });
-      } else {
-        const i = key.indexOf(":");
-        focusFn({ ssl: BigInt(key.slice(i + 1)), pid: Number(key.slice(0, i)) });
+    /* Keep decode faults local to the offending event (gotcha 12). One decoder /
+     * registry serves every tap — records are keyed by (pid, ssl), so multiple
+     * pid-scoped taps just fold into the same connection registry. */
+    const onEvent = (e) => {
+      try {
+        const now = Date.now();
+        for (const rec of decoder.push(e)) reg.ingest(rec, now);
+      } catch {
+        /* a single bad event must not wreck the stream; it's just dropped. */
       }
     };
 
-    /* error records degrade to the stats line: bump the event counter and let
-     * the header surface it. We keep a small status string for the header. */
+    /* The live taps, one per armed pid, reconciled against controls.armedPids
+     * each heartbeat. Each entry owns its probe session (its own focus map and
+     * teardown). `binWideTap` is the separate --bin escape hatch: a single tap
+     * not scoped to a pid, seeing every process that maps the binary. */
+    const taps = new Map(); // pid -> { stop, setFocus, bin, err, stopped }
+    let binWideTap = null;
+
+    const refreshStatus = () => {
+      const errs = [...taps.values()].map((t) => t.err).filter(Boolean);
+      if (errs.length) return status.set(`tap fault: ${errs[0]}`);
+      const names = [...taps.values(), binWideTap]
+        .filter(Boolean)
+        .map((t) => t.bin && t.bin.split("/").pop())
+        .filter(Boolean);
+      const live = taps.size + (binWideTap ? 1 : 0);
+      if (live === 0) return status.set("idle · press c to pick a process to decode");
+      status.set(`tracing · ${names.length ? [...new Set(names)].join(", ") : `${live} process(es)`}`);
+    };
+
+    /* Push the current capture focus into one tap. Each probe object has its own
+     * focus map; a pid-scoped tap only ever sees its own pid, so it needs just
+     * the SSL* filter. The bin-wide tap sees many pids, so it takes both. */
+    const applyFocus = (entry, pid) => {
+      if (!entry?.setFocus) return;
+      const key = focusKey.get();
+      if (key == null) return entry.setFocus({ ssl: 0n, pid: 0 }); // capture-all
+      const i = key.indexOf(":");
+      const fpid = Number(key.slice(0, i));
+      const fssl = BigInt(key.slice(i + 1));
+      if (pid == null) entry.setFocus({ ssl: fssl, pid: fpid }); // bin-wide: filter both
+      else entry.setFocus({ ssl: pid === fpid ? fssl : 0n, pid: 0 }); // pid-scoped: ssl only
+    };
+    let lastFocus = undefined;
+    const syncFocus = () => {
+      const key = focusKey.get();
+      if (key === lastFocus) return;
+      lastFocus = key;
+      for (const [pid, entry] of taps) applyFocus(entry, pid);
+      applyFocus(binWideTap, null);
+    };
+
+    const startTap = (pid) => {
+      const entry = { stop: () => {}, setFocus: null, bin: null, err: null, stopped: false };
+      taps.set(pid, entry);
+      snoop({
+        pid,
+        plaintext,
+        onEvent,
+        onBin: (t) => ((entry.bin = t), refreshStatus()),
+        onError: (e) => ((entry.err = emsg(e)), refreshStatus()),
+      })
+        .then((s) => {
+          if (entry.stopped) return s.stop(); // disarmed before the attach resolved
+          entry.stop = () => s.stop();
+          entry.setFocus = s.setFocus;
+          applyFocus(entry, pid);
+          refreshStatus();
+        })
+        .catch((e) => ((entry.err = emsg(e)), refreshStatus()));
+    };
+
+    const stopTap = (pid) => {
+      const entry = taps.get(pid);
+      if (!entry) return;
+      taps.delete(pid);
+      entry.stopped = true;
+      entry.stop();
+      reg.dropPid(pid); /* its rows leave the table now, not a window later */
+      refreshStatus();
+    };
+
+    /* Reconcile the live taps against the armed set (read non-reactively — this
+     * runs on the heartbeat timer, so arming a process takes effect within one
+     * beat, no extra machinery). */
+    const reconcileTaps = () => {
+      const want = new Set(armedPids.get());
+      for (const pid of want) if (!taps.has(pid)) startTap(pid);
+      for (const pid of [...taps.keys()]) if (!want.has(pid)) stopTap(pid);
+    };
+
+    /* The --bin escape hatch: one bin-wide tap for the whole session (it traps
+     * every process using the binary — the only broad-overhead path, opted into
+     * explicitly). Its events fold into the registry by their own pid. */
+    if (binWide) {
+      const entry = { stop: () => {}, setFocus: null, bin: null };
+      snoop({
+        bin: binWide,
+        plaintext,
+        onEvent,
+        onBin: (t) => ((entry.bin = t), refreshStatus()),
+        onError: (e) => status.set(`tap fault: ${emsg(e)}`),
+      })
+        .then((s) => {
+          entry.stop = () => s.stop();
+          entry.setFocus = s.setFocus;
+          binWideTap = entry;
+          applyFocus(entry, null);
+          refreshStatus();
+        })
+        .catch((e) => status.set(`probe failed: ${emsg(e)}`));
+    }
+
     let lastMember = -1;
     const publish = () => {
       /* The heartbeat is a timer callback — an uncaught throw here escapes into
        * the runtime and can take down the whole V8 worker (closing the TTY with
        * no message). Catch it, surface it on the status line, and keep ticking. */
       try {
+        reconcileTaps(); /* start/stop taps to match the armed set */
         const now = Date.now();
         reg.evict(now, selectedConn.get()); /* pin the conn being inspected */
         /* If the focused connection has closed/recycled/evicted, the kernel
-         * filter would silence *everything* — release focus so the table
-         * doesn't look frozen. */
+         * filter would silence *everything* on its tap — release focus so the
+         * table doesn't look frozen. */
         if (focusKey.get() && reg.focusGone(focusKey.get())) clearFocus();
         syncFocus();
         const snap = reg.snapshot();
@@ -483,50 +588,22 @@ export function createSession({ bin, pid, debug = false, plaintext = false } = {
         stats.set(snap.stats);
         clock.set(now);
       } catch (e) {
-        status.set(`heartbeat fault: ${e && e.message ? e.message : e}`);
+        status.set(`heartbeat fault: ${emsg(e)}`);
       }
     };
 
-    /* Keep decode faults local to the offending event (gotcha 12). */
-    const onEvent = (e) => {
-      try {
-        const now = Date.now();
-        for (const rec of decoder.push(e)) reg.ingest(rec, now);
-      } catch {
-        /* a single bad event must not wreck the stream; it's just dropped. */
-      }
-    };
-
-    /* A failed attach (missing BTF, no root, bad bind) becomes a status line
-     * rather than an unhandled rejection painted over the screen — the session
-     * produces no data and the chrome says why. */
-    let boundBin = null; /* the resolved SSL binary, surfaced in the status line */
-    const session = snoop({
-      bin,
-      pid,
-      plaintext,
-      onEvent,
-      onBin: (t) => (boundBin = t),
-      onError: (e) => status.set(`tap fault: ${e && e.message ? e.message : e}`),
-    })
-      .then((s) => {
-        status.set(boundBin ? `tracing · ${boundBin.split("/").pop()}` : "tracing");
-        focusFn = s.setFocus; /* enable the capture-focus control */
-        syncFocus();
-        return s;
-      })
-      .catch((e) => {
-        status.set(`probe failed: ${e && e.message ? e.message : e}`);
-        return { stop() {} };
-      });
-
+    refreshStatus();
     /* One snapshot per heartbeat, never per ringbuf event (gotcha 10). */
     const beat = setInterval(publish, HEARTBEAT_MS);
     publish();
 
     return () => {
       clearInterval(beat);
-      session.then((s) => s.stop());
+      for (const entry of taps.values()) {
+        entry.stopped = true;
+        entry.stop();
+      }
+      binWideTap?.stop();
     };
   }, null);
 

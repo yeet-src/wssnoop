@@ -15,6 +15,7 @@ import Toolbar from "./toolbar.jsx";
 import Group from "./group.jsx";
 import Container from "./container.jsx";
 import Inspector from "./inspector.jsx";
+import Browser from "./browser.jsx";
 import Help from "./help.jsx";
 import Minibuffer from "./minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
@@ -22,7 +23,7 @@ import { COL } from "../palette.js";
 import { layout, START, DEST_MIN } from "./columns.js";
 import {
   vizRange, sortKey, filters, selected, search, matches, searchHasFields, isInspecting,
-  destWidth, dragging, endColDrag, helpOpen,
+  destWidth, dragging, endColDrag, helpOpen, browserOpen, isBrowsing,
 } from "../controls.js";
 import { groupMetric, rankMap } from "../lib/rank.js";
 import { mergeHists } from "../lib/timehist.js";
@@ -37,6 +38,9 @@ export default function Root({ size, groups, global, stats, status, clock }) {
   const inspector = computed(() =>
     selected.get() != null ? <Inspector groups={groups} now={clock} size={size} /> : null,
   );
+  /* The connection browser (layer-1 discovery) is a swap-in overlay like the
+   * inspector; memoized so it mounts once when opened, not per heartbeat. */
+  const browser = computed(() => (browserOpen.get() ? <Browser /> : null));
   /* Help is a modal overlay (scrim + centered panel) on top of whatever's
    * showing; memoized so it mounts once when opened, not per heartbeat. */
   const help = computed(() => (helpOpen.get() ? <Help size={size} /> : null));
@@ -50,7 +54,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
           /* The inspector is a full-screen view by design (the wide JSON payloads
            * want the room): while it's open the table isn't rendered at all — a
            * swap, not a stack. */
-          if (isInspecting()) return null;
+          if (isInspecting() || isBrowsing()) return null;
           /* Membership level: role is fixed once a conn handshakes, so the role
            * filter and the empty-group drop belong here (rebuild on toggle, not
            * per tick). activeOnly is time-varying, so it's applied per-row in
@@ -156,6 +160,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
         }}
         </Box>
         {inspector}
+        {browser}
         {/* While dragging the column handle, a transparent full-screen lid
             tracks the pointer anywhere on screen (it needn't stay on the 1-cell
             handle) and ends the drag on release. */}

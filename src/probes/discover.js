@@ -43,6 +43,11 @@ export const KNOWN_BINS = ["node", "deno", "bun", "python3", "python", "ruby"];
 /* An explicit target needs no discovery: a path, a `.so`, or a libssl name. */
 export const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
 
+/* Which known runtime a process is (by exe/comm), or null. The connection
+ * browser uses this to mark the confidently-tappable processes — a known
+ * runtime resolves cleanly to its SSL binary, so arming it will decode. */
+export const runtimeOf = (exe, comm) => KNOWN_BINS.find((n) => nameMatches(exe, comm, n)) ?? null;
+
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
 const race = (p, ms) => Promise.race([p, timeout(ms)]);
 

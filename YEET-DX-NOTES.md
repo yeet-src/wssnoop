@@ -177,6 +177,25 @@ reality · **[uncatchable]** can't be handled from JS.
   `env VAR=val` or real flags. We moved the demo knobs to CLI flags so the shell
   can't eat them.
 
+### 28. No way for a script to hand back a re-invocation command on exit **[missing-stair]**
+- **Symptom:** an interactive session discovers/selects its target (here, the
+  resolved `--bin` path and/or `--pid`), but that knowledge dies with the
+  process. The next launch rediscovers from scratch; there's no "here's the
+  exact command to skip the picker next time."
+- **Desired:** like `claude --resume <id>`, a script should be able to emit a
+  suggested re-invocation (`yeet run <path> --bin <resolved> [--pid N]`) that the
+  CLI surfaces on exit, so a target chosen once is replayable non-interactively
+  (a shell alias, a script, CI). This is general *routing* — a script computing
+  its own canonical next invocation, not wssnoop-specific.
+- **Why the obvious approach fails:** `console.log` can't be the vehicle. It
+  goes to the daemon's (binary) log, not the terminal the user launched from
+  (gotcha 8), and the TUI owns the alt-screen until teardown — so a script has
+  no way to leave a "run this next" line on the real stdout.
+- **Suggested fix:** a first-class runtime affordance — the script registers the
+  suggestion (e.g. `yeet.suggestReinvoke(argv)`) and the `yeet` CLI, which owns
+  the real stdout and outlives the daemon session, prints it after restoring the
+  terminal. Not `console.log`, not a stdout convention.
+
 ---
 
 ## What we changed in wssnoop because of the above

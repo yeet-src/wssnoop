@@ -14,15 +14,20 @@
  *   components/       — present: pure UI reading those signals.
  * This file is the seam: parse args, build the session, mount the view.
  *
- * Run (against the demo node server in the VM):
- *   yeet run src/main.jsx -- --pid <node-pid> [--bin <ssl-binary>]
+ * Run:
+ *   yeet run src/main.jsx                    # no args: browse & pick a process
+ *   yeet run src/main.jsx -- --pid <pid>     # arm one process straight away
+ *   yeet run src/main.jsx -- --bin <binary>  # bin-wide (every process using it)
  *
+ * With no args nothing is tapped: the connection browser (layer-1 discovery,
+ * near-zero cost) opens on the host-wide list of outbound connections, and you
+ * click a process to attach a pid-scoped SSL tap to it. Reopen it any time with
+ * `c`. --pid arms one process up front; each armed process gets its own tap
+ * scoped to that pid, so bystanders pay nothing.
  * --bin is where the SSL_read/SSL_write symbols live: a shared OpenSSL
- *   (`libssl.so`) OR an absolute path to a statically-linked executable. It is
- *   optional — omit it and wssnoop discovers the target from the process graph
- *   (a bare name like `node` is resolved to its exe; with --pid it finds that
- *   process's mapped libssl, else its exe). See probes/probe.js `resolveBin`.
- * --pid scopes the probe to one process (recommended). */
+ *   (`libssl.so`) OR an absolute path to a statically-linked executable. It
+ *   attaches bin-wide (the one broad-overhead path). Omit it and each armed pid
+ *   discovers its own SSL binary from the process graph (probes/discover.js). */
 
 import { mount } from "yeet:tui";
 
@@ -45,6 +50,12 @@ import {
   helpOpen,
   toggleHelp,
   closeHelp,
+  arm,
+  browserOpen,
+  openBrowser,
+  closeBrowser,
+  toggleBrowser,
+  isBrowsing,
 } from "./controls.js";
 
 const args = (typeof yeet !== "undefined" && yeet.args) || {};
@@ -93,8 +104,15 @@ tty.on("keydown", (e) => {
     e.preventDefault?.();
     return startSearch();
   }
+  /* `c` toggles the connection browser (layer-1 discovery) — pick which
+   * processes to decode. Not while inspecting a message log. */
+  if (key.toLowerCase() === "c" && !isInspecting()) {
+    e.preventDefault?.();
+    return toggleBrowser();
+  }
   if (e.code === "Escape") {
     if (helpOpen.get()) return closeHelp();
+    if (browserOpen.get()) return closeBrowser();
     if (search.get()) return clearSearch();
     if (cursorPinned.get()) return clearCursor();
     if (isInspecting()) return closeInspector();
@@ -104,17 +122,29 @@ tty.on("keydown", (e) => {
 
   /* Global-action shortcuts (sort/role/idle/rows/window) — the same actions the
    * toolbar buttons run, each discoverable via the button's mouseover. Gated to
-   * the table view so they don't fire behind the inspector overlay. */
+   * the table view so they don't fire behind an overlay. */
   const action = keymap[key];
-  if (action && !isInspecting() && !helpOpen.get()) {
+  if (action && !isInspecting() && !helpOpen.get() && !isBrowsing()) {
     e.preventDefault?.();
     action();
   }
 });
 
-/* The session is a bundle of signals; the BPF tap attaches when the view mounts
- * (the signals get watched) and detaches when it unmounts. */
-const session = createSession({ bin: BIN, pid: PID, debug: DEBUG, plaintext: PLAINTEXT });
+/* Decide the initial capture target from the args:
+ *   --pid N   → arm that process (a pid-scoped tap; bystanders pay nothing).
+ *   --bin X   → a bin-wide tap (traps every process using X — the one broad-
+ *               overhead path, opted into explicitly).
+ *   neither   → nothing tapped; open the browser to pick a process from the
+ *               live host-wide connection list (layer-1, near-zero cost).
+ * The browser is always reopenable with `c`. */
+if (PID != null) arm(PID);
+const BIN_WIDE = PID == null && BIN != null ? BIN : null;
+if (PID == null && BIN == null) openBrowser();
+
+/* The session is a bundle of signals; the BPF taps attach when the view mounts
+ * (the signals get watched), reconcile against the armed set, and detach when
+ * it unmounts. */
+const session = createSession({ binWide: BIN_WIDE, debug: DEBUG, plaintext: PLAINTEXT });
 let teardown;
 try {
   teardown = mount((size) => <Root size={size} {...session} />);

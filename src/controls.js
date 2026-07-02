@@ -195,6 +195,35 @@ export const clearCursor = () => {
   cursorFrac.set(null);
 };
 
+/* ---- armed processes (which pids carry a live SSL tap) --------------- */
+/* The set of pids we're decoding right now. Each armed pid gets its own
+ * pid-scoped uprobe (kernel-scoped to that process — bystanders pay nothing);
+ * state.js reconciles the live taps against this set every heartbeat. Empty at
+ * a no-args launch: nothing is tapped until you pick a process in the browser,
+ * so an idle host imposes zero SSL-capture overhead. */
+export const armedPids = signal([]);
+export const isArmed = (pid) => armedPids.get().includes(pid);
+export const arm = (pid) => {
+  if (isArmed(pid)) return;
+  armedPids.update((a) => [...a, pid]);
+  flash(`decoding pid ${pid} · a uprobe is now scoped to just this process`);
+};
+export const disarm = (pid) => {
+  armedPids.update((a) => a.filter((p) => p !== pid));
+  flash(`stopped decoding pid ${pid}`);
+};
+export const toggleArm = (pid) => (isArmed(pid) ? disarm(pid) : arm(pid));
+
+/* ---- connection browser (layer-1 discovery view) -------------------- */
+/* The host-wide connection list (netconn) that you pick tap targets from. A
+ * swap-in overlay like the inspector; opens automatically when nothing is armed
+ * (an empty table would otherwise read as broken), reopenable with `c`. */
+export const browserOpen = signal(false);
+export const openBrowser = () => browserOpen.set(true);
+export const closeBrowser = () => browserOpen.set(false);
+export const toggleBrowser = () => browserOpen.update((v) => !v);
+export const isBrowsing = () => browserOpen.get();
+
 /* ---- kernel capture focus (user → kernel write) ---------------------- */
 /* The connection key the BPF filter is pinned to, or null for "capture all".
  * state.js watches this and patches the probe's .bss globals, so focusing a
