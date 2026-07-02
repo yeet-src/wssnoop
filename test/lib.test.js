@@ -13,7 +13,7 @@ import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
 import { compile, messageText } from "../src/lib/query.js";
-import { resolveBin, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
+import { resolveBin, discoverTargets, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
 
 let pass = 0;
 let fail = 0;
@@ -437,6 +437,38 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
 
   // a graph that rejects (or wedges) must fall back, not propagate.
   eq(await resolveBin({ pid: 1 }, { query: () => Promise.reject(new Error("boom")) }), DEFAULT_BIN, "graph error → default");
+}
+
+/* ==== target enumeration (discover.discoverTargets) ================== */
+{
+  const graph = (procs) => ({ query: () => Promise.resolve({ data: { procs } }) });
+  const proc = (pid, comm, exe, cgroup) => ({ stat: { pid, comm }, exe, cgroups: cgroup ? [{ pathname: cgroup }] : [] });
+
+  // three node workers sharing one host binary → one target, three pids.
+  let t = await discoverTargets(graph([proc(1, "node", "/usr/bin/node"), proc(2, "node", "/usr/bin/node"), proc(3, "node", "/usr/bin/node")]));
+  eq(t.length, 1, "same binary → one target");
+  eq(t[0].pids, [1, 2, 3], "target collects all its pids");
+  eq(t[0].container, null, "host target has no container");
+
+  // distinct runtimes → distinct targets (this is when the picker shows).
+  t = await discoverTargets(graph([proc(1, "node", "/usr/bin/node"), proc(2, "python3", "/usr/bin/python3")]));
+  eq(t.length, 2, "two runtimes → two targets");
+
+  // a host node and its containerized twin are different inodes → two targets,
+  // the container one carrying its id. (Non-runtime procs are ignored.)
+  t = await discoverTargets(
+    graph([
+      proc(1, "node", "/usr/bin/node"),
+      proc(2, "node", "/usr/local/bin/node", "/system.slice/docker-abc123def456aaaabbbbcccc.scope"),
+      proc(9, "sshd", "/usr/sbin/sshd"),
+    ]),
+  );
+  eq(t.length, 2, "host vs container node → two targets, sshd ignored");
+  eq(
+    t.find((x) => x.container)?.container?.id,
+    "abc123def456",
+    "container target carries its short id",
+  );
 }
 
 /* ---- summary -------------------------------------------------------- */

@@ -11,6 +11,8 @@
 
 import { signal } from "yeet:tui";
 
+import { containerOf } from "../lib/container.js";
+
 const info = signal({}); // pid -> identity, republished as each resolves
 const seen = new Set(); // pids queried (resolved or in-flight) — query once each
 
@@ -37,17 +39,6 @@ export function procLabel(info) {
     return arg ? `${head || exeBase} ${base(arg)}` : head || exeBase || comm;
   }
   return comm || exeBase || null;
-}
-
-/* Best-effort container id from a cgroup path: docker / containerd / crio / k8s
- * all embed the 64-hex id in the cgroup path. Returns the short (12-char) form,
- * or null when the process isn't containerized. */
-function containerOf(cgroups) {
-  for (const c of cgroups || []) {
-    const m = /(?:docker[-/]|containerd[-/]|crio-|libpod-)([0-9a-f]{12,64})/.exec(c.pathname || "");
-    if (m) return m[1].slice(0, 12);
-  }
-  return null;
 }
 
 const QUERY = (pid) => `{ proc(pid: ${pid}) { cmdline exe stat { comm } cgroups { pathname } } }`;

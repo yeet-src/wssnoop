@@ -17,6 +17,8 @@
  *   - anything unresolved            → "libssl.so", the dynamic-linking default.
  */
 
+import { containerOf } from "../lib/container.js";
+
 const base = (p) => (p || "").split("/").pop() || "";
 
 export const DEFAULT_BIN = "libssl.so";
@@ -80,6 +82,35 @@ async function pidForKnownRuntime(graph) {
  * pidless resolution (a --pid that's gone, an unmatched name) yields null. */
 async function binForPid(pid, graph) {
   return pid != null ? sslForPid(pid, graph) : null;
+}
+
+/* Enumerate the distinct traceable binaries on the box — what a no-args launch
+ * chooses between. Cheap by design: ONE procs query, NO per-pid maps query (the
+ * attachable path is resolved lazily with resolveBin, only for the target that
+ * gets picked — a maps query is the heavy one, YEET-DX-NOTES.md #10).
+ *
+ * Two processes are the same target when they share an exe AND a container: a
+ * bin-wide uprobe attaches to an inode, and a host runtime and its containerized
+ * twin are different inodes (different mount namespaces), so they list
+ * separately. That split is exactly when the picker is worth showing — one
+ * distinct binary means the launcher can just attach it, no prompt.
+ *
+ * Returns `[{ runtime, exe, container: {id}|null, pids: [pid,…] }, …]`, container
+ * name/image left to the caller (it has the docker registry). */
+export async function discoverTargets(graph = defaultGraph()) {
+  const { data } = await graph.query(`{ procs { stat { pid comm } exe cgroups { pathname } } }`);
+  const byBinary = new Map();
+  for (const p of data?.procs || []) {
+    const exe = p.exe || "";
+    const runtime = KNOWN_BINS.find((n) => base(exe) === n || p.stat?.comm === n);
+    if (!runtime) continue;
+    const cid = containerOf(p.cgroups);
+    const key = `${cid ?? ""}\0${exe}`;
+    let t = byBinary.get(key);
+    if (!t) byBinary.set(key, (t = { runtime, exe, container: cid ? { id: cid } : null, pids: [] }));
+    if (p.stat?.pid != null) t.pids.push(p.stat.pid);
+  }
+  return [...byBinary.values()];
 }
 
 export async function resolveBin({ bin, pid }, graph = defaultGraph()) {
