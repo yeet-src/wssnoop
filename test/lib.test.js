@@ -13,6 +13,7 @@ import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
 import { compile, messageText } from "../src/lib/query.js";
+import { resolveBin, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
 
 let pass = 0;
 let fail = 0;
@@ -369,6 +370,73 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   eq(ring.count(test), 2, "ring.count tallies matching messages");
   eq(ring.count(() => true), ring.size, "ring.count(all) == size");
   eq(ring.count(() => false), 0, "ring.count(none) == 0");
+}
+
+/* ==== binary discovery (probes/discover.js, against a fake graph) ===== */
+{
+  /* A fake system graph: answers `proc(pid: N)` from `byPid`, any `procs` list
+   * from `procs`. `query` is async, matching the real yeet.graph shape. */
+  const graph = ({ procs = [], byPid = {} } = {}) => ({
+    query: (q) => {
+      const m = /proc\(pid:\s*(\d+)\)/.exec(q);
+      if (m) return Promise.resolve({ data: { proc: byPid[m[1]] ?? null } });
+      return Promise.resolve({ data: { procs } });
+    },
+  });
+  const R = async (args, world, msg) => eq(await resolveBin(args, graph(world)), world.want, msg);
+
+  // isExplicit: a path, a .so, or a libssl name skips discovery entirely.
+  ok(isExplicit("/usr/bin/node") && isExplicit("libssl.so.3") && isExplicit("libssl"), "isExplicit path/.so/libssl");
+  ok(!isExplicit("node") && !isExplicit("python3"), "isExplicit rejects bare names");
+  eq(await resolveBin({ bin: "/opt/node" }, graph({})), "/opt/node", "explicit path returned as-is (no graph)");
+  eq(await resolveBin({ bin: "libssl.so" }, graph({})), "libssl.so", "explicit library returned as-is");
+
+  // --pid, static SSL (node): no libssl mapped → the exe, namespace-rewritten.
+  await R({ pid: 42 }, { byPid: { 42: { exe: "/usr/bin/node", maps: [] } }, want: "/proc/42/root/usr/bin/node" }, "--pid static → namespaced exe");
+  // --pid, dynamic SSL: a mapped libssl wins over the exe.
+  await R(
+    { pid: 7 },
+    { byPid: { 7: { exe: "/usr/bin/python3", maps: [{ path: "/usr/lib/x86_64-linux-gnu/libssl.so.3" }] } }, want: "/proc/7/root/usr/lib/x86_64-linux-gnu/libssl.so.3" },
+    "--pid dynamic → namespaced libssl",
+  );
+  // --pid inside a container: the in-container exe path becomes host-attachable
+  // through /proc/<pid>/root — the whole point of container support.
+  await R({ pid: 900 }, { byPid: { 900: { exe: "/usr/local/bin/node", maps: [] } }, want: "/proc/900/root/usr/local/bin/node" }, "--pid container → /proc/pid/root rewrite");
+  // --pid gone (proc null) → fall back, never throw.
+  await R({ pid: 404 }, { byPid: {}, want: DEFAULT_BIN }, "--pid gone → default");
+
+  // bare --bin name matches by exe basename, then resolves that pid's SSL path.
+  await R(
+    { bin: "node" },
+    { procs: [{ stat: { pid: 5, comm: "MainThread" }, exe: "/usr/bin/node" }], byPid: { 5: { exe: "/usr/bin/node", maps: [] } }, want: "/proc/5/root/usr/bin/node" },
+    "--bin node matches by exe basename",
+  );
+  // matches by comm when the exe basename differs (a renamed/wrapped binary).
+  await R(
+    { bin: "ruby" },
+    { procs: [{ stat: { pid: 8, comm: "ruby" }, exe: "/opt/rbenv/versions/3.3/bin/ruby3.3" }], byPid: { 8: { exe: "/opt/rbenv/versions/3.3/bin/ruby3.3", maps: [{ path: "/lib/libssl.so.3" }] } }, want: "/proc/8/root/lib/libssl.so.3" },
+    "--bin ruby matches by comm",
+  );
+  await R({ bin: "nope" }, { procs: [{ stat: { pid: 5, comm: "node" }, exe: "/usr/bin/node" }], want: DEFAULT_BIN }, "--bin unmatched → default");
+
+  // no args: pick the first running known runtime, in KNOWN_BINS order (node
+  // before python), then its SSL path.
+  await R(
+    {},
+    {
+      procs: [
+        { stat: { pid: 3, comm: "python3" }, exe: "/usr/bin/python3" },
+        { stat: { pid: 4, comm: "node" }, exe: "/usr/bin/node" },
+      ],
+      byPid: { 3: { exe: "/usr/bin/python3", maps: [{ path: "/lib/libssl.so.3" }] }, 4: { exe: "/usr/bin/node", maps: [] } },
+      want: "/proc/4/root/usr/bin/node",
+    },
+    "no args → known runtime, node preferred over python",
+  );
+  await R({}, { procs: [{ stat: { pid: 1, comm: "systemd" }, exe: "/sbin/init" }], want: DEFAULT_BIN }, "no args, no known runtime → default");
+
+  // a graph that rejects (or wedges) must fall back, not propagate.
+  eq(await resolveBin({ pid: 1 }, { query: () => Promise.reject(new Error("boom")) }), DEFAULT_BIN, "graph error → default");
 }
 
 /* ---- summary -------------------------------------------------------- */

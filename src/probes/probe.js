@@ -6,6 +6,8 @@
 
 import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
 
+import { resolveBin } from "./discover.js";
+
 // bin/probe.bpf.o sits at the project root (src/bpf/wssnoop.bpf.c links into
 // it — see build/bpf.mk). `base: import.meta.dirname` anchors the lookup on
 // this module's directory, which differs by one level between the two ways
@@ -15,96 +17,6 @@ import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
 // deeper, so ../../bin). Detect the bundle by its entry filename.
 const inBundle = import.meta.filename.endsWith("/index.jsx");
 const BIN_DIR = inBundle ? "../bin" : "../../bin";
-
-const base = (p) => (p || "").split("/").pop() || "";
-
-/* Resolve the binary that *holds* SSL_read/SSL_write into an attachable target.
- * The uprobe attach doesn't $PATH-resolve, and SSL lives in different places —
- * a mapped `libssl.so` for dynamically-linked programs, the executable itself
- * for statically-linked ones (node, some Python builds). So:
- *
- *   - an explicit path ("/usr/bin/node") or library name ("libssl.so") → as-is.
- *   - a bare program name ("node") → the exe of a running process that matches,
- *     resolved to an absolute path.
- *   - nothing, but a --pid is given → that process's mapped libssl, else its exe.
- *   - nothing and no pid → "libssl.so", the dynamic-linking common case.
- *
- * All graph lookups are raced against a short timeout and fall back to
- * "libssl.so": discovery is a convenience, never a way to wedge startup (a maps
- * query can be heavy — see YEET-DX-NOTES.md #10). */
-const DEFAULT_BIN = "libssl.so";
-const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
-
-/* Runtimes whose TLS is worth tracing out of the box, so `--bin` is only needed
- * for anything off this list ("--bin just for extras"). node/deno/bun bake
- * OpenSSL into the executable (static — we probe the exe itself); the scripting
- * runtimes usually map a libssl (dynamic — sslForPid prefers it). Ordered by how
- * likely a wss:// workload is to be one of them. */
-const KNOWN_BINS = ["node", "deno", "bun", "python3", "python", "ruby"];
-
-const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
-const race = (p, ms) => Promise.race([p, timeout(ms)]);
-
-/* The SSL-bearing binary for one pid: a mapped libssl wins (dynamic linking),
- * else the exe (static). Resolved *through the target's mount-namespace root*
- * (`/proc/<pid>/root/...`) so a containerized process's node/libssl — an
- * in-container path the host can't open directly — becomes host-attachable. For
- * a host process `/proc/<pid>/root` is just `/`, so the path is unchanged. This
- * is what lets `--pid <container-pid>` trace a process inside a container. */
-async function sslForPid(pid) {
-  const { data } = await yeet.graph.query(`{ proc(pid: ${pid}) { exe maps { path } } }`);
-  const p = data?.proc;
-  if (!p) return null;
-  const lib = (p.maps || []).map((m) => m.path).find((x) => x && /libssl/i.test(x));
-  const path = lib || p.exe || null;
-  return path ? `/proc/${pid}/root${path.startsWith("/") ? "" : "/"}${path}` : null;
-}
-
-/* Absolute exe of a running process whose exe-basename or comm matches `name`. */
-async function exeForName(name) {
-  const { data } = await yeet.graph.query(`{ procs { exe stat { comm } } }`);
-  const hit = (data?.procs || []).find((p) => p.exe && (base(p.exe) === name || p.stat?.comm === name));
-  return hit?.exe ?? null;
-}
-
-/* The SSL binary to trace when nothing was specified: find the first running
- * process on KNOWN_BINS and resolve its SSL-bearing path (mapped libssl, else
- * the exe — the same namespace-aware resolution --pid uses). Returns null when
- * none of the known runtimes are running, so the caller falls back to
- * libssl.so. A single node exe covers every node process at once, which is the
- * common case (the demo's three workers share one binary). */
-async function knownRuntimeBin() {
-  const { data } = await yeet.graph.query(`{ procs { stat { pid comm } exe } }`);
-  const procs = data?.procs || [];
-  for (const name of KNOWN_BINS) {
-    const hit = procs.find((p) => (p.exe && base(p.exe) === name) || p.stat?.comm === name);
-    const pid = hit?.stat?.pid;
-    if (pid == null) continue;
-    const path = await sslForPid(pid);
-    if (path) return path;
-  }
-  return null;
-}
-
-export async function resolveBin({ bin, pid }) {
-  if (bin && isExplicit(bin)) return bin; // already a path or a library name
-  try {
-    if (!bin && pid != null) {
-      const found = await race(sslForPid(pid), 1500);
-      if (found) return found;
-    } else if (bin) {
-      const found = await race(exeForName(bin), 1500);
-      if (found) return found;
-    } else {
-      /* nothing specified: auto-discover a standard runtime before defaulting */
-      const found = await race(knownRuntimeBin(), 1500);
-      if (found) return found;
-    }
-  } catch {
-    /* discovery failed/timed out — fall back to the dynamic-linking default */
-  }
-  return DEFAULT_BIN;
-}
 
 /* Attach the SSL_write and SSL_read uprobes in `bin` (scoped to `pid` when
  * given), delivering each plaintext chunk to onEvent(rawEvent) and any
