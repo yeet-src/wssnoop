@@ -22,16 +22,30 @@
 # exit code in the captured pane (proves it actually returned vs hung).
 set -uo pipefail
 
+# Fully detached from the ambient environment, so a run is reproducible no
+# matter what tmux/shell config or working directory the caller happens to have:
+#   -L wssdbg   a dedicated server, not the user's
+#   -f /dev/null  ignore ~/.tmux.conf and any TMUX_* config
+#   -c START_DIR  pin the pane's cwd (below) — a detached server otherwise
+#                 inherits a nondeterministic cwd, and a launched command that
+#                 shells out to git/relative paths then fails intermittently
+#   bash --noprofile --norc (in `launch`)  ignore ~/.bashrc / ~/.profile
 TM=(tmux -L wssdbg -f /dev/null)   # isolated server, no config
 SES=wss
 COLS="${WSS_COLS:-200}"
 ROWS="${WSS_ROWS:-50}"
 
+# Pin the pane's working directory to the repo root (this script lives in
+# scripts/), overridable with WSS_CWD. Deterministic regardless of where the
+# tmux server was first spawned.
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+START_DIR="${WSS_CWD:-$(cd "$HERE/.." && pwd)}"
+
 case "${1:-}" in
   launch)
     cmd="${2:?launch needs a command}"
     "${TM[@]}" kill-session -t "$SES" 2>/dev/null || true
-    "${TM[@]}" new-session -d -s "$SES" -x "$COLS" -y "$ROWS" \
+    "${TM[@]}" new-session -d -s "$SES" -x "$COLS" -y "$ROWS" -c "$START_DIR" \
       "bash --noprofile --norc -c $(printf '%q' "$cmd")"
     # keep the pane after the command exits, so a clean exit's output (e.g. an
     # `RC_$?` marker) survives to be captured instead of closing the server.
