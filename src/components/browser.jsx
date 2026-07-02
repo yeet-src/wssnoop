@@ -11,7 +11,7 @@
 import { Box, Text, bold, fg } from "yeet:tui";
 
 import { connections } from "../probes/netconn.js";
-import { procInfo, resolve } from "../probes/procinfo.js";
+import { procInfo, resolve, sslInfo, classifySsl } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";
 import { runtimeOf } from "../probes/discover.js";
 import { isArmed, toggleArm } from "../controls.js";
@@ -34,30 +34,36 @@ export default function Browser() {
         {() => {
           const conns = connections.get();
           const info = procInfo.get();
+          const scls = sslInfo.get();
           const cmap = containers.get();
 
-          /* Group live connections by pid; resolve identity for labels (cached,
-           * so calling per render is cheap — it queries a pid only once). */
+          /* Group live connections by pid; resolve identity + SSL class for each
+           * (both cached, queried once per pid, so calling per render is cheap). */
           const byPid = new Map();
           for (const c of conns) {
             resolve(c.pid);
+            classifySsl(c.pid);
             let a = byPid.get(c.pid);
             if (!a) byPid.set(c.pid, (a = []));
             a.push(c);
           }
 
-          /* Keep known TLS runtimes (they resolve cleanly to an SSL binary) plus
-           * anything already armed, so you can always disarm what you started. */
+          /* Keep processes with reachable TLS — a mapped libssl (any language) or
+           * a static-OpenSSL runtime — plus anything already armed, so you can
+           * always disarm what you started. Class-driven, not a name list, so a
+           * Rust native-tls or dynamically-linked C++ app shows up too. A pid
+           * still being classified is held back until its class arrives. */
           const rows = [];
           let hidden = 0;
           for (const [pid, arr] of byPid) {
             const id = info[pid];
-            const runtime = runtimeOf(id?.exe, id?.comm);
-            if (!runtime && !isArmed(pid)) {
-              hidden += 1;
-              continue;
+            const cls = scls[pid];
+            if (!isArmed(pid)) {
+              if (cls == null) continue; // still classifying
+              if (cls === "opaque") { hidden += 1; continue; }
             }
-            rows.push({ pid, arr, runtime, id });
+            const tag = runtimeOf(id?.exe, id?.comm) ?? (cls === "libssl" ? "libssl" : "?");
+            rows.push({ pid, arr, tag, id });
           }
           /* Stable order by pid — a busy process gaining connections must not
            * reshuffle rows under the pointer (arming would land on the wrong
@@ -68,7 +74,7 @@ export default function Browser() {
             return (
               <Text break="none" italic fg={COL.dim}>
                 {conns.length
-                  ? `  ${byPid.size} process(es) connecting, none a recognized TLS runtime yet…`
+                  ? `  ${byPid.size} process(es) connecting, none with reachable TLS yet…`
                   : "  watching for outbound connections…"}
               </Text>
             );
@@ -96,7 +102,7 @@ export default function Browser() {
                 )}
               >
                 <Text width={2}>{armed ? fg(COL.accent)("●") : fg(COL.dim)("○")}</Text>
-                <Text width={8}>{fg(COL.dim)((r.runtime ?? "?").padEnd(8))}</Text>
+                <Text width={8}>{fg(COL.dim)(r.tag.padEnd(8))}</Text>
                 <Box width="1fr" overflow="ellipsis" break="none">
                   <Text>{armed ? bold(fg(COL.ink)(label)) : fg(COL.dim)(label)}</Text>
                 </Box>
@@ -111,7 +117,7 @@ export default function Browser() {
 
           if (hidden > 0) {
             list.push(
-              <Text height={1} italic fg={COL.dim}>{`  + ${hidden} other connecting process(es) (not a recognized TLS runtime)`}</Text>,
+              <Text height={1} italic fg={COL.dim}>{`  + ${hidden} other connecting process(es) (no reachable TLS — Go/rustls/stripped or non-TLS)`}</Text>,
             );
           }
           return list;

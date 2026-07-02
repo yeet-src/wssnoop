@@ -13,7 +13,7 @@ import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
 import { compile, messageText } from "../src/lib/query.js";
-import { resolveBin, discoverTargets, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
+import { resolveBin, discoverTargets, sslClass, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
 
 let pass = 0;
 let fail = 0;
@@ -444,6 +444,19 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
 
   // a graph that rejects (or wedges) must fall back, not propagate.
   eq(await resolveBin({ pid: 1 }, { query: () => Promise.reject(new Error("boom")) }), DEFAULT_BIN, "graph error → default");
+}
+
+/* ==== ssl reachability class (discover.sslClass) ==================== */
+{
+  const C = (o, want, msg) => eq(sslClass(o), want, msg);
+  // a mapped libssl wins, whatever the language — the name-agnostic signal.
+  C({ exe: "/app/gateway", comm: "gateway", maps: ["/lib/x86_64-linux-gnu/libssl.so.3"] }, "libssl", "any exe mapping libssl → libssl");
+  C({ exe: "/usr/bin/python3.13", comm: "worker", maps: ["/lib/libssl.so.3"] }, "libssl", "libssl mapping wins over the name hint");
+  // no libssl, but a runtime that statically bakes OpenSSL into the exe.
+  C({ exe: "/usr/bin/node", comm: "node", maps: [] }, "runtime", "static-OpenSSL runtime (node) → runtime");
+  C({ exe: "/usr/bin/node", comm: "node" }, "runtime", "missing maps tolerated → runtime hint");
+  // neither: Go's crypto/tls, rustls, a stripped static build.
+  C({ exe: "/app/feed", comm: "feed", maps: ["/lib/libc.so.6"] }, "opaque", "no libssl, unknown runtime → opaque");
 }
 
 /* ==== target enumeration (discover.discoverTargets) ================== */

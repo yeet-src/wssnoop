@@ -43,10 +43,32 @@ export const KNOWN_BINS = ["node", "deno", "bun", "python3", "python", "ruby"];
 /* An explicit target needs no discovery: a path, a `.so`, or a libssl name. */
 export const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
 
-/* Which known runtime a process is (by exe/comm), or null. The connection
- * browser uses this to mark the confidently-tappable processes — a known
- * runtime resolves cleanly to its SSL binary, so arming it will decode. */
+/* Which known runtime a process is (by exe/comm), or null. Only a *hint* now:
+ * the general tappability signal is sslClass below (a mapped libssl, any
+ * language). This still names a runtime so the browser can label a row. */
 export const runtimeOf = (exe, comm) => KNOWN_BINS.find((n) => nameMatches(exe, comm, n)) ?? null;
+
+const LIBSSL = /libssl/i;
+/* The libssl a process maps (dynamic OpenSSL), or null. One primitive, shared by
+ * resolveBin (which wants the path to attach) and sslClass (which wants the
+ * fact). `paths` is the process's mapped file paths. */
+const libsslPath = (paths) => (paths || []).find((p) => p && LIBSSL.test(p)) ?? null;
+
+/* How confidently the SSL uprobe will bind to a process, from graph-visible
+ * facts alone (the graph exposes maps and exe, not ELF symbols). Name-agnostic
+ * first, so no runtime is privileged:
+ *   "libssl"  — maps a libssl (dynamic OpenSSL): the symbols are definitely
+ *               present, whatever the language (Rust native-tls, a dynamically
+ *               linked C++ app, the scripting runtimes).
+ *   "runtime" — a known runtime that bakes OpenSSL into the executable
+ *               (node/deno/bun): no libssl mapping, but the symbols are
+ *               statically there. The one place a name is unavoidable.
+ *   "opaque"  — neither: Go's crypto/tls, rustls, or a stripped static build.
+ *               Arming still attempts; the tap self-reports opaque if no
+ *               plaintext comes back.
+ * `maps` is the process's mapped file paths. */
+export const sslClass = ({ exe, comm, maps }) =>
+  libsslPath(maps) ? "libssl" : runtimeOf(exe, comm) ? "runtime" : "opaque";
 
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
 const race = (p, ms) => Promise.race([p, timeout(ms)]);
@@ -69,7 +91,7 @@ async function sslForPid(pid, graph) {
   const { data } = await graph.query(`{ proc(pid: ${pid}) { exe maps { path } } }`);
   const p = data?.proc;
   if (!p) return null;
-  const lib = (p.maps || []).map((m) => m.path).find((x) => x && /libssl/i.test(x));
+  const lib = libsslPath((p.maps || []).map((m) => m.path));
   const path = lib || p.exe || null;
   return path ? nsPath(pid, path) : null;
 }

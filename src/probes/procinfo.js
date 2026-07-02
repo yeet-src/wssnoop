@@ -12,11 +12,37 @@
 import { signal } from "yeet:tui";
 
 import { containerOf } from "../lib/container.js";
+import { sslClass } from "./discover.js";
 
 const info = signal({}); // pid -> identity, republished as each resolves
 const seen = new Set(); // pids queried (resolved or in-flight) — query once each
 
 export const procInfo = info;
+
+const race = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("graph timeout")), ms))]);
+
+/* SSL reachability class per pid (see discover.sslClass), a separate lazy cache
+ * from identity: it needs the process's maps, the heavy query (YEET-DX-NOTES.md
+ * #10), so it's raced against a timeout and kept apart so a pathological maps
+ * read can't wedge the cheap identity lookup. undefined = still classifying;
+ * the browser treats that as pending, not opaque. */
+const ssl = signal({}); // pid -> "libssl" | "runtime" | "opaque"
+const sslSeen = new Set();
+
+export const sslInfo = ssl;
+
+export function classifySsl(pid) {
+  if (pid == null || sslSeen.has(pid)) return;
+  sslSeen.add(pid);
+  race(yeet.graph.query(`{ proc(pid: ${pid}) { exe stat { comm } maps { path } } }`), 1500)
+    .then(({ data }) => {
+      const p = data && data.proc;
+      if (!p) return; /* pid gone before we classified — leave pending */
+      const cls = sslClass({ exe: p.exe ?? "", comm: p.stat?.comm ?? null, maps: (p.maps || []).map((m) => m.path) });
+      ssl.update((m) => ({ ...m, [pid]: cls }));
+    })
+    .catch(() => {}); /* timeout/error: leave unclassified rather than mislabel opaque */
+}
 
 const base = (p) => (p || "").split("/").pop() || "";
 
