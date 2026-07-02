@@ -486,18 +486,24 @@ export function createSession({ binWide = null, debug = false } = {}) {
     let binWideTap = null;
 
     const refreshStatus = () => {
-      const errs = [...taps.values()].map((t) => t.err).filter(Boolean);
-      if (errs.length) return status.set(`tap fault: ${errs[0]}`);
+      let err = null;
+      let plaintext = 0;
+      let opaque = 0;
+      const names = new Set();
+      const tally = (t) => {
+        if (!t) return;
+        if (t.err) err = t.err;
+        if (t.plaintext) plaintext += 1;
+        if (t.opaque) opaque += 1;
+        if (t.bin) names.add(t.bin.split("/").pop());
+      };
+      for (const t of taps.values()) tally(t);
+      tally(binWideTap);
+      if (err) return status.set(`tap fault: ${err}`);
       const live = taps.size + (binWideTap ? 1 : 0);
       if (live === 0) return status.set("idle · c to pick");
-      const names = [...taps.values(), binWideTap]
-        .filter(Boolean)
-        .map((t) => t.bin && t.bin.split("/").pop())
-        .filter(Boolean);
-      const plaintext = [...taps.values()].filter((t) => t.plaintext).length;
-      const opaque = [...taps.values()].filter((t) => t.opaque).length;
       const parts = [];
-      if (names.length) parts.push([...new Set(names)].join(", "));
+      if (names.size) parts.push([...names].join(", "));
       if (plaintext) parts.push(`${plaintext} plaintext`);
       if (opaque) parts.push(`${opaque} opaque`);
       status.set(`tracing · ${parts.length ? parts.join(" · ") : `${live} process(es)`}`);
