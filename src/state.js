@@ -78,6 +78,14 @@ function createMsgRing(cap) {
       for (let i = 0; i < n; i++) out[i] = a[(total - 1 - i) % cap];
       return out;
     },
+    /* How many retained messages satisfy `pred`, without materializing an
+     * array — the per-service search-match count reads this every heartbeat. */
+    count(pred) {
+      const n = Math.min(total, cap);
+      let hits = 0;
+      for (let i = 0; i < n; i++) if (pred(a[(total - 1 - i) % cap])) hits += 1;
+      return hits;
+    },
     get total() {
       return total;
     },
@@ -185,6 +193,8 @@ export function createRegistry({ onDrop } = {}) {
   const groups = new Map(); // pid -> { pid, conns:Map, hist, msgUp, msgDn }
   const globalHist = createTimeHist();
   let globalMsgs = 0;
+  let globalMsgUp = 0;
+  let globalMsgDn = 0;
   let events = 0;
   /* Bumped only when the *set* of conns/groups changes (create or drop). The
    * session republishes the groups snapshot only when this moves, so the UI
@@ -311,10 +321,12 @@ export function createRegistry({ onDrop } = {}) {
       if (rec.dir === DIR_WRITE) {
         c.msgUp += 1;
         g.msgUp += 1;
+        globalMsgUp += 1;
         addFlow(c, g, now, UP, bytes);
       } else {
         c.msgDn += 1;
         g.msgDn += 1;
+        globalMsgDn += 1;
         addFlow(c, g, now, DOWN, bytes);
       }
       globalMsgs += 1;
@@ -392,7 +404,7 @@ export function createRegistry({ onDrop } = {}) {
     }
     return {
       groups: groupList,
-      global: { hist: globalHist, conns: conns.size, msgs: globalMsgs },
+      global: { hist: globalHist, conns: conns.size, msgs: globalMsgs, msgUp: globalMsgUp, msgDn: globalMsgDn },
       stats: { conns: conns.size, msgs: globalMsgs, events },
       memberVersion,
     };
@@ -410,7 +422,7 @@ export function createRegistry({ onDrop } = {}) {
 
 export function createSession({ bin, pid, debug = false, plaintext = false } = {}) {
   const groups = signal([]);
-  const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0 });
+  const global = signal({ hist: createTimeHist(), conns: 0, msgs: 0, msgUp: 0, msgDn: 0 });
   const stats = signal({ conns: 0, msgs: 0, events: 0 });
   const clock = signal(Date.now());
   /* A one-line health string for the chrome: a blank dashboard with no status

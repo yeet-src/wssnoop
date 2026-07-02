@@ -14,6 +14,7 @@ import { Box, Text, face, computed } from "yeet:tui";
 import Button from "./button.jsx";
 import Row from "./row.jsx";
 import Sparkline from "./sparkline.jsx";
+import Agg from "./agg.jsx";
 import { COL } from "../palette.js";
 import { GAP, HANDLE, INDENT } from "./columns.js";
 import {
@@ -105,6 +106,8 @@ export default function Group({ group, conns, now, span, geom, order, depth = 0,
             </Text>
           </Box>
           <Text break="none" fg={COL.dim}>{`${conns.length} ws`}</Text>
+          <Text break="none" fg={COL.dim}> · </Text>
+          <Agg hist={hist} conns={() => conns} now={now} />
         </Box>
         <Box width={HANDLE} break="none" />
         <Sparkline hist={hist} now={now} span={span} width={geom.spark} originX={geom.left + HANDLE} variant="agg" />

@@ -21,7 +21,7 @@ import SearchBar from "./searchbar.jsx";
 import { COL } from "../palette.js";
 import { layout, START, DEST_MIN } from "./columns.js";
 import {
-  vizRange, sortKey, filters, selected, search, matches, isInspecting,
+  vizRange, sortKey, filters, selected, search, matches, searchHasFields, isInspecting,
   destWidth, dragging, endColDrag, helpOpen,
 } from "../controls.js";
 import { groupMetric, rankMap } from "../lib/rank.js";
@@ -42,7 +42,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
   const help = computed(() => (helpOpen.get() ? <Help size={size} /> : null));
   return (
     <Box direction="column" width="1fr" height="1fr" bg={COL.bg}>
-      <Toolbar global={global} stats={stats} status={status} now={clock} span={vizRange} sizeSig={size} />
+      <Toolbar groups={groups} global={global} stats={stats} status={status} now={clock} span={vizRange} sizeSig={size} />
       <Box height="1fr" overflow="hidden">
        <Layer>
         <Box width="1fr" height="1fr" overflow="hidden">
@@ -69,7 +69,12 @@ export default function Root({ size, groups, global, stats, status, clock }) {
             .map((g) => ({ g, conns: role === "all" ? g.conns : g.conns.filter((c) => c.role === role) }))
             .filter(({ conns }) => conns.length > 0);
 
-          if (q) {
+          /* A plain-text query filters connections by their identity (label /
+           * role / dest). A `$.field` query is about message content, so it
+           * doesn't hide rows — every service stays visible and its header shows
+           * a live match count (see Agg). */
+          const textFilter = q && !searchHasFields();
+          if (textFilter) {
             view = view
               .map(({ g, conns }) =>
                 matches(info[g.pid]?.label ?? "", q) // whole process matches → keep all its conns
@@ -80,7 +85,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
           }
 
           if (view.length === 0) {
-            if (q) return <Text break="none" italic fg={COL.dim}>{`  no connections match “${q}”`}</Text>;
+            if (textFilter) return <Text break="none" italic fg={COL.dim}>{`  no connections match “${q}”`}</Text>;
             /* No WebSocket connections yet. The toolbar status line already
              * shows the probe state (tracing / probe failed), so keep this quiet. */
             return <Text break="none" italic fg={COL.dim}>  No WSS connections</Text>;

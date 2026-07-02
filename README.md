@@ -153,7 +153,8 @@ sees all three workers at once) — but note a `--bin`-only attach hooks the
 processes that exist *at attach time*, so start the targets first.
 
 Keys: `/` search · `s` sort · `r` role · `i` idle rows · `a` rows-per-process ·
-`[` / `]` activity window · `q` / `Ctrl-C` quit · `Esc` backs out (clear filter
+`m` aggregate metric (bandwidth/messages) · `[` / `]` activity window · `q` /
+`Ctrl-C` quit · `Esc` backs out (clear filter
 → close inspector → quit). Everything else is mouse-driven; hover any control
 for help (and its shortcut) in the minibuffer.
 

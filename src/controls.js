@@ -12,7 +12,9 @@
  * is global state precisely so the Button doesn't need to know the minibuffer.
  */
 
-import { signal } from "yeet:tui";
+import { signal, computed } from "yeet:tui";
+
+import { compile, messageText } from "./lib/query.js";
 
 const wrap = (arr, v, dir = 1) => {
   const i = arr.indexOf(v);
@@ -33,6 +35,16 @@ export const SORTS = ["recent", "newest", "bytes"];
 export const SORT_LABELS = { recent: "recent", newest: "newest", bytes: "bytes" };
 export const sortKey = signal("recent");
 export const cycleSort = () => sortKey.update((s) => wrap(SORTS, s));
+
+/* ---- aggregate metric ------------------------------------------------ */
+/* What the per-node aggregate figure (ALL row + each group/container header)
+ * reports: `bytes` = total bandwidth ↑/↓ (the default — egress cost is the
+ * headline concern), `msgs` = message counts ↑/↓. A view control; the figures
+ * are computed at render from the live hists / conn counters. */
+export const AGG = ["bytes", "msgs"];
+export const AGG_LABELS = { bytes: "bandwidth", msgs: "messages" };
+export const aggMetric = signal("bytes");
+export const cycleAgg = () => aggMetric.update((m) => wrap(AGG, m));
 
 /* ---- filters --------------------------------------------------------- */
 /* role: all | client | server.  activeOnly: hide conns idle in the window.
@@ -62,6 +74,16 @@ export const typeSearch = (ch) => (search.update((s) => s + ch), inspectScroll.s
 export const backspaceSearch = () => (search.update((s) => s.slice(0, -1)), inspectScroll.set(0));
 export const matches = (text, q = search.get()) =>
   !q || (text != null && String(text).toLowerCase().includes(q.toLowerCase()));
+
+/* The table query compiled against message bodies (recompiled only when the
+ * query text changes). A query carrying a `$.field` term is a *message* query:
+ * in the table it doesn't hide connection rows (that would couple membership to
+ * live message content), it drives a live "matching / total messages" count per
+ * service — the well-supported path for the error/tag workflow (search
+ * `$.error`, watch which services light up). A plain-text query keeps filtering
+ * connections by their URL, as before. `searchHasFields` is that discriminator. */
+export const tableMatcher = computed(() => compile(search.get(), { text: messageText }));
+export const searchHasFields = () => tableMatcher.get().fields;
 
 /* ---- collapse (rows shown per process group) ------------------------- */
 /* Rows to show: 0 = collapsed (header only) or Infinity = expanded (all rows).
@@ -99,6 +121,7 @@ export const selectedConn = signal(null);
  * Living here, they persist across those rebuilds. `inspect` resets them so a
  * freshly opened connection starts live, unscrolled, collapsed. */
 export const inspectScroll = signal(0); // index of the topmost shown message
+export const inspectScrollAt = signal(0); // Date.now() of the last scroll gesture; the overlay scrollbar shows briefly after, then fades (web-style)
 export const inspectExpanded = signal(null); // seq of the message whose payload is open
 export const inspectFrozen = signal(false); // paused (reading history) vs. following live
 export const inspectSnap = signal([]); // frozen snapshot of messages while paused
@@ -112,6 +135,7 @@ export const inspect = (conn) => {
   selectedConn.set(conn);
   inspectFrozen.set(false);
   inspectScroll.set(0);
+  inspectScrollAt.set(0);
   inspectExpanded.set(null);
   inspectSnap.set([]);
   inspectDetails.set(false);
@@ -207,6 +231,8 @@ export const titles = {
     `idle rows (i) · now ${filters.get().activeOnly ? "hidden" : "shown"}; press i to ${filters.get().activeOnly ? "show" : "hide"} them`,
   rows: () =>
     `rows per process (a) · now ${COLLAPSE_LABELS[collapse.get().global]}; press a for ${COLLAPSE_LABELS[next(COLLAPSE_STEPS, collapse.get().global)]}`,
+  agg: () =>
+    `aggregate metric (m) · now ${AGG_LABELS[aggMetric.get()]}; press m for ${AGG_LABELS[next(AGG, aggMetric.get())]} · the ↑/↓ figure on ALL and each process/container header`,
   vizDown: () => `shorter activity window ([) · now ${RANGE_LABELS[vizRange.get()]}`,
   vizUp: () => `longer activity window (]) · now ${RANGE_LABELS[vizRange.get()]}`,
 };
@@ -218,6 +244,7 @@ export const keymap = {
   r: cycleRole,
   i: toggleActive,
   a: cycleAll,
+  m: cycleAgg,
   "[": () => cycleViz(-1),
   "]": () => cycleViz(1),
 };

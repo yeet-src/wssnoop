@@ -132,6 +132,42 @@ broken. Make sure there's a test so this doesn't regress again.
   the `?` button stays left of the spacer. Workaround if you need the cluster
   right-aligned and complete: give it an explicit `width` (a fixed-width sibling
   of a `1fr` is measured correctly) rather than relying on `fit`.
+- **Correction 2026-07-01 (NOT an engine bug — a wssnoop usage bug):** ran the
+  toolbar shape through the layout engine headlessly (yeet
+  `module.test.js` / `layout/module.test.js`). A `fit` cluster beside a `1fr`
+  spacer measures **correctly** in every variant — plain, padded
+  (padding→frame→zstack), and the real padded + thunk-width button: it hugs
+  content + gaps and sits flush at the right edge, the spacer taking the slack.
+  The live clip is because **our cluster has no `width`, so it defaults to
+  `fr(1)`** (a bare `<Box>` is `fr(1)`, not `fit`); it then takes a flex share
+  too small for its buttons, which overflow `overflow:hidden`. **Fix: set
+  `width="fit"` on the cluster** (`toolbar.jsx`), then the `?` button can move
+  back in. No engine change needed; the "fit/auto-width under-measures" and
+  "adjacent auto-width boxes drop their gap" claims above are disproven by the
+  regression tests (gaps ARE reserved: 54 content + 5 gaps = 59). Two tests lock
+  this in on `ben/dx-fixes-for-wssnoop`.
+
+### 24. A signal read in the JSX *body* binds at mount; a later identity swap is missed **[silent]**
+- **Symptom:** the ALL-row aggregate `<Agg hist={ghist.get()} …/>` froze at
+  `↑0B ↓0B` while every per-process header — fed the same kind of live hist —
+  climbed normally. The figure never moved even under heavy traffic.
+- **Cause:** `ghist` is `computed(() => global.get().hist)`, and the `global`
+  signal starts on a *placeholder* `{ hist: emptyHist, … }`, swapping to the
+  registry's real hist only on the first heartbeat publish. Reading `ghist.get()`
+  in the JSX body (not inside a thunk) captures whatever it is at mount — the
+  empty placeholder — and never re-reads. The per-process headers worked only
+  because their hist object *is* the live one from the first render. The usual
+  "live objects mutate in place, so reading once is fine" intuition holds for a
+  stably-identified object but breaks the moment a signal *replaces* the object.
+- **Workaround:** read the signal inside a thunk child so it re-binds on the
+  swap: `{() => <Agg hist={ghist.get()} …/>}`. Deduped by the `computed`, it
+  re-mints only on the single identity change.
+- **Suggested fix:** nothing to fix in the engine — it's the documented thunk
+  rule — but the docs frame it as "plain value vs thunk"; a line noting that *a
+  signal read in the body is a plain value* (frozen at mount even when it's an
+  object later replaced) would save the debugging. Or: seed session signals with
+  the real long-lived objects up front so identity never swaps (state.js could
+  hand out the registry's `globalHist` in the initial `global` value).
 
 ---
 
@@ -221,6 +257,21 @@ DEFERRED
   linked SSL (node), the binary *is* the exe; for dynamic, it's `libssl.so`.
 - **Suggested fix:** `$PATH`-resolve a bare name, or say so in the error
   ("expected an absolute path or a library on the loader path").
+
+### 25. The debug harness `key` can't send named keys (Escape/Enter) — typed literally **[missing-stair]**
+- **Symptom:** `wss-harness.sh key Escape` didn't clear the search / back out; it
+  *appended the letters* "Escape" to the query box. With a `$.field` query live
+  that then matched nothing, so the screen showed a puzzling `0/N` instead of a
+  cleared filter — looked like a reactivity bug, wasn't.
+- **Cause:** the harness sends every key with `tmux send-keys -l` (literal), so
+  tmux key *names* (`Escape`, `Enter`, `Up`) come through as their characters,
+  not the keypress. `q` "worked" only because it's a literal char.
+- **Workaround:** send named keys with a raw tmux call minus `-l`:
+  `tmux -L wssdbg -f /dev/null send-keys -t wss Escape`. The app routes these via
+  `e.code` (`Escape`/`Enter`/`Backspace`), so they need the real key event.
+- **Suggested fix:** give `wss-harness.sh` a `keyname <name>` subcommand (or
+  auto-detect known tmux key names) that omits `-l`, so back-out / confirm /
+  arrow flows are testable headlessly like clicks and chars already are.
 
 ### 13. The daemon log is binary **[missing-stair]**
 - `/tmp/yeetd.log` is not plain text; `cat`/`tail` give mojibake. You need

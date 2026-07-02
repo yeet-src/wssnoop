@@ -25,6 +25,7 @@ const SECTIONS = [
       ["DEST", "destination wss:// (or ws://) URL · '?' when unknown"],
       ["MSG ↑/↓", "WebSocket messages sent / received"],
       ["ACTIVITY", "bytes/sec per column · upper ▀ sent, lower ▄ received · brighter = more"],
+      ["↑/↓ on headers", "aggregate per process/container/ALL · bandwidth or messages (agg / m)"],
     ],
   },
   {
@@ -51,11 +52,12 @@ const SECTIONS = [
       ["$.path OP val", "test a message's decoded JSON body"],
       ["operators", "> >= < <= (numeric) · == != (typed) · ~ (substring) · $.x (present)"],
       ["examples", '$.price>100    $.type=="trade"    $.sym~usd    $.error'],
+      ["a $.field in the table", "counts matching / total messages per service (e.g. $.error)"],
     ],
   },
 ];
 
-const KEYS = "q quit · / search · Esc back · s sort · r role · i idle · a rows · [ ] window · ? help";
+const KEYS = "q quit · / search · Esc back · s sort · r role · i idle · a rows · m metric · [ ] window · ? help";
 const TERM = 17;
 const PANEL_W = 98; // fits the widest line; capped to the terminal below
 

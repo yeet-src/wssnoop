@@ -14,6 +14,7 @@ import { Box, Text, face, computed } from "yeet:tui";
 import Button from "./button.jsx";
 import Group from "./group.jsx";
 import Sparkline from "./sparkline.jsx";
+import Agg from "./agg.jsx";
 import { COL } from "../palette.js";
 import { GAP, HANDLE } from "./columns.js";
 import { collapseFor, cycleGroup, COLLAPSE_LABELS, sortKey, filters, tip } from "../controls.js";
@@ -64,6 +65,8 @@ export default function Container({ cid, name, image, members, hist, now, span, 
             </Text>
           </Box>
           <Text break="none" fg={COL.dim}>{`${members.length} proc`}</Text>
+          <Text break="none" fg={COL.dim}> · </Text>
+          <Agg hist={hist} conns={() => conns} now={now} />
         </Box>
         <Box width={HANDLE} break="none" />
         <Sparkline hist={hist} now={now} span={span} width={geom.spark} originX={geom.left + HANDLE} variant="agg" />

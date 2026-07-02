@@ -26,7 +26,7 @@ import { hoverTip, hoverBg } from "./hover.js";
 import { COL, roleColor, jsonColor } from "../palette.js";
 import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
 import { toJsonl, messageJson } from "../lib/export.js";
-import { compile } from "../lib/query.js";
+import { compile, messageText } from "../lib/query.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import { destOf, destTip, peerInfo } from "../probes/peers.js";
 import {
@@ -37,6 +37,7 @@ import {
   flash,
   search,
   inspectScroll as scroll,
+  inspectScrollAt as scrollAt,
   inspectExpanded as expanded,
   inspectFrozen as frozen,
   inspectSnap as snap,
@@ -49,13 +50,10 @@ import {
   isFocused,
 } from "../controls.js";
 
-/* Everything a plain-text term tests a message against (text is the JSON). */
-const searchable = (rec) => `${rec.name} ${rec.text ?? ""}${rec.inflateError ?? ""}`;
-
 /* The compiled query predicate, recompiled only when the query changes. Plain
- * text is a substring over `searchable`; `$.path OP value` terms test the
- * decoded JSON body (see lib/query.js). */
-const matcher = computed(() => compile(search.get(), { text: searchable }));
+ * text is a substring over the message haystack (opcode + text + inflate error);
+ * `$.path OP value` terms test the decoded JSON body (see lib/query.js). */
+const matcher = computed(() => compile(search.get(), { text: messageText }));
 
 /* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */
 const copy = (text, note) => {
@@ -69,6 +67,7 @@ const copy = (text, note) => {
 
 const RULE = "─".repeat(400);
 const MAX_LINES = 400; /* cap an expanded payload so a huge frame can't run away */
+const SCROLLBAR_FADE_MS = 1200; /* how long the overlay scrollbar lingers after a scroll */
 
 const ageOf = (now, at) => `${fmtAgo(now - at)}`.padStart(4);
 const arrow = (dir) => (dir === DIR_WRITE ? fg(COL.out)("↑") : fg(COL.in)("↓"));
@@ -167,6 +166,7 @@ export default function Inspector({ groups, now, size }) {
 
   const onWheel = (e) => {
     pause(); /* examining history — stop the tail from yanking it away */
+    scrollAt.set(Date.now()); /* wake the overlay scrollbar (fades when idle) */
     const d = e.deltaY > 0 ? 3 : -3;
     /* the last page aligns the oldest message to the bottom, so you can't
      * scroll past the content (and can't scroll at all when it all fits). */
@@ -562,7 +562,11 @@ export default function Inspector({ groups, now, size }) {
                 const all = currentMsgs(); /* frozen/live tail, narrowed by the query */
                 count = all.length;
                 if (count === 0) {
-                  const msg = search.get() ? `  no messages match “${search.get()}”` : "  waiting for messages…";
+                  const msg = search.get()
+                    ? `  no messages match “${search.get()}”`
+                    : c.status === "closed"
+                      ? "  connection closed · no messages were captured"
+                      : "  waiting for messages…";
                   return <Text break="none">{pipe(msg, fg(COL.header), italic)}</Text>;
                 }
                 const top = Math.min(Math.max(0, scroll.get()), Math.max(0, count - viewH()));
@@ -599,6 +603,10 @@ export default function Inspector({ groups, now, size }) {
                  text column shows through, not occluded. The edge fades carry the
                  "scrollable" cue; this adds where-am-I. Hidden when it all fits. */
               if (!lookup()) return null;
+              /* Web-overlay behaviour: the thumb appears on a scroll gesture and
+                 fades once the pointer rests. now.get() (the heartbeat) re-runs
+                 this so it hides on its own after the window elapses. */
+              if (Date.now() - scrollAt.get() > SCROLLBAR_FADE_MS) return null;
               now.get();
               const n = currentMsgs().length;
               const h = viewH();

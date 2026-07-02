@@ -8,15 +8,18 @@
  * group: re-ranking re-flows the layout order and hiding collapses the row to height
  * 0, neither rebuilding the row. Widths come from columns.js so rows align. */
 
-import { Box, Text, face } from "yeet:tui";
+import { Box, Text, face, fg } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
 import Pair from "./pair.jsx";
 import { COL, roleColor } from "../palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
-import { tip, inspect } from "../controls.js";
+import { tip, inspect, searchHasFields, tableMatcher } from "../controls.js";
 import { destOf, destTip } from "../probes/peers.js";
 import { hoverTip, hoverBg } from "./hover.js";
+
+const matchTip = (c) =>
+  `search matches · messages matching the active $.field query on this connection / total retained (${c.msgs.size})`;
 
 const roleTip = (c) =>
   c.role === "client"
@@ -50,13 +53,30 @@ export default function Row({ conn, now, span, geom, order, visible, depth = 0 }
         <Box width={geom.dest} overflow="ellipsis" break="none" {...tip(() => destTip(conn))}>
           <Text fg={COL.dim}>{() => (now.get(), destOf(conn))}</Text>
         </Box>
+        {/* MSG column: normally sent/received counts, but while a `$.field`
+            search is active it shows this connection's matching / total messages
+            (flagged when any hit) — so you see which service the matches sit on. */}
         <Box width={W_MSG} overflow="hidden">
-          <Pair
-            desc="messages on this connection"
-            sep=" "
-            up={{ color: COL.out, label: "sent (↑)", text: () => (now.get(), `${conn.msgUp}↑`) }}
-            down={{ color: COL.in, label: "received (↓)", text: () => (now.get(), `${conn.msgDn}↓`) }}
-          />
+          {() =>
+            searchHasFields() ? (
+              <Box direction="row" width="fit" height={1} break="none" {...tip(() => matchTip(conn))}>
+                <Text break="none">
+                  {() => {
+                    now.get();
+                    const hit = conn.msgs.count(tableMatcher.get().test);
+                    return fg(hit > 0 ? COL.warn : COL.dim)(`${hit}/${conn.msgs.size}`);
+                  }}
+                </Text>
+              </Box>
+            ) : (
+              <Pair
+                desc="messages on this connection"
+                sep=" "
+                up={{ color: COL.out, label: "sent (↑)", text: () => (now.get(), `${conn.msgUp}↑`) }}
+                down={{ color: COL.in, label: "received (↓)", text: () => (now.get(), `${conn.msgDn}↓`) }}
+              />
+            )
+          }
         </Box>
       </Box>
       <Box width={HANDLE} break="none" />

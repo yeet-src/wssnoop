@@ -12,7 +12,7 @@ import { createRegistry } from "../src/state.js";
 import { base64, messageRecord, toJsonl } from "../src/lib/export.js";
 import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
-import { compile } from "../src/lib/query.js";
+import { compile, messageText } from "../src/lib/query.js";
 
 let pass = 0;
 let fail = 0;
@@ -349,6 +349,26 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   ok(m("json", "not json here"), "query: text term still works on non-JSON");
   // a literal $ that isn't an accessor degrades to text
   ok(m("$5", "it costs $5"), "query: bare $ token falls back to text");
+
+  // messageText haystack = opcode + text + inflate error, tolerant of gaps
+  eq(messageText({ name: "TEXT", text: '{"a":1}' }), 'TEXT {"a":1}', "messageText joins name + text");
+  eq(messageText({ name: "BIN" }), "BIN ", "messageText tolerates missing text");
+}
+
+/* ==== msg ring count (per-service search-match counting) ============== */
+{
+  // the retained-message ring counts matches without materializing an array —
+  // exercised via a real registry (createMsgRing is internal)
+  const reg = createRegistry();
+  const text = (s) => ({ type: "message", pid: 1, ssl: 9n, dir: DIR_READ, msg: { name: "TEXT", opcode: 1, len: s.length, text: s } });
+  reg.ingest(text('{"type":"trade"}'), 1);
+  reg.ingest(text('{"type":"quote"}'), 2);
+  reg.ingest(text('{"type":"trade"}'), 3);
+  const ring = reg.snapshot().groups[0].conns[0].msgs;
+  const { test } = compile('$.type == "trade"', { text: messageText });
+  eq(ring.count(test), 2, "ring.count tallies matching messages");
+  eq(ring.count(() => true), ring.size, "ring.count(all) == size");
+  eq(ring.count(() => false), 0, "ring.count(none) == 0");
 }
 
 /* ---- summary -------------------------------------------------------- */

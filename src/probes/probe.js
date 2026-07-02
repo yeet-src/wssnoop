@@ -35,6 +35,13 @@ const base = (p) => (p || "").split("/").pop() || "";
 const DEFAULT_BIN = "libssl.so";
 const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
 
+/* Runtimes whose TLS is worth tracing out of the box, so `--bin` is only needed
+ * for anything off this list ("--bin just for extras"). node/deno/bun bake
+ * OpenSSL into the executable (static — we probe the exe itself); the scripting
+ * runtimes usually map a libssl (dynamic — sslForPid prefers it). Ordered by how
+ * likely a wss:// workload is to be one of them. */
+const KNOWN_BINS = ["node", "deno", "bun", "python3", "python", "ruby"];
+
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
 const race = (p, ms) => Promise.race([p, timeout(ms)]);
 
@@ -60,6 +67,25 @@ async function exeForName(name) {
   return hit?.exe ?? null;
 }
 
+/* The SSL binary to trace when nothing was specified: find the first running
+ * process on KNOWN_BINS and resolve its SSL-bearing path (mapped libssl, else
+ * the exe — the same namespace-aware resolution --pid uses). Returns null when
+ * none of the known runtimes are running, so the caller falls back to
+ * libssl.so. A single node exe covers every node process at once, which is the
+ * common case (the demo's three workers share one binary). */
+async function knownRuntimeBin() {
+  const { data } = await yeet.graph.query(`{ procs { stat { pid comm } exe } }`);
+  const procs = data?.procs || [];
+  for (const name of KNOWN_BINS) {
+    const hit = procs.find((p) => (p.exe && base(p.exe) === name) || p.stat?.comm === name);
+    const pid = hit?.stat?.pid;
+    if (pid == null) continue;
+    const path = await sslForPid(pid);
+    if (path) return path;
+  }
+  return null;
+}
+
 export async function resolveBin({ bin, pid }) {
   if (bin && isExplicit(bin)) return bin; // already a path or a library name
   try {
@@ -68,6 +94,10 @@ export async function resolveBin({ bin, pid }) {
       if (found) return found;
     } else if (bin) {
       const found = await race(exeForName(bin), 1500);
+      if (found) return found;
+    } else {
+      /* nothing specified: auto-discover a standard runtime before defaulting */
+      const found = await race(knownRuntimeBin(), 1500);
       if (found) return found;
     }
   } catch {

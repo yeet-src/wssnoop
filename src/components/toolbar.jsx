@@ -12,6 +12,7 @@ import { Box, Text, face, computed, signal } from "yeet:tui";
 
 import Button from "./button.jsx";
 import Sparkline from "./sparkline.jsx";
+import Agg from "./agg.jsx";
 import { hoverTip, hoverBg } from "./hover.js";
 import { COL } from "../palette.js";
 import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
@@ -19,6 +20,7 @@ import {
   vizRange, RANGE_LABELS, cycleViz,
   sortKey, SORT_LABELS, cycleSort,
   filters, cycleRole, toggleActive,
+  aggMetric, AGG_LABELS, cycleAgg,
   collapse, COLLAPSE_LABELS, cycleAll,
   search, searchActive, startSearch,
   focusKey, clearFocus,
@@ -49,7 +51,7 @@ function Resizer() {
   );
 }
 
-export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
+export default function Toolbar({ groups, global, stats, status, now, span, sizeSig }) {
   /* One geometry, derived per read from the live width + drag state, so the
    * header strips re-flow in lockstep with the table during a resize or drag. */
   const geom = () => layout(sizeSig.get().cols, destWidth.get());
@@ -121,6 +123,9 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
           <Button title={titles.rows} onClick={cycleAll}>
             {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
           </Button>
+          <Button title={titles.agg} onClick={cycleAgg}>
+            {() => `agg:${AGG_LABELS[aggMetric.get()]}`}
+          </Button>
           <Button title={titles.vizDown} onClick={() => cycleViz(-1)}>‹</Button>
           <Text break="none">
             {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
@@ -134,12 +139,21 @@ export default function Toolbar({ global, stats, status, now, span, sizeSig }) {
       <Box direction="row" height={1} overflow="hidden">
         <Box
           width={() => geom().left}
+          direction="row"
           padding={[0, 0, 0, INDENT]}
           break="none"
           overflow="hidden"
           {...tip("ALL: every traced process and connection, combined")}
         >
           <Text break="none" bold fg={COL.accent}>ALL</Text>
+          <Box width="1fr" break="none" />
+          {/* ghist.get() in a thunk: the global signal starts on an empty
+              placeholder hist and swaps to the registry's live one on the first
+              publish, so binding it once at build would freeze the ALL figure at
+              zero (deduped to a stable identity, this re-mints just that once). */}
+          {() => (
+            <Agg hist={ghist.get()} conns={() => groups.get().flatMap((g) => g.conns)} now={now} />
+          )}
         </Box>
         <Box width={HANDLE} break="none" />
         {() => (

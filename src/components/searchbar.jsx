@@ -6,7 +6,7 @@
 import { Box, Text, bold, fg } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import { search, searchActive, isInspecting } from "../controls.js";
+import { search, searchActive, isInspecting, searchHasFields } from "../controls.js";
 import { COL } from "../palette.js";
 
 export default function SearchBar() {
@@ -17,15 +17,20 @@ export default function SearchBar() {
           const active = searchActive.get();
           const q = search.get();
           if (!active && !q) return "";
-          const scope = isInspecting() ? "messages" : "connections";
-          /* In the message log the query is a field language, not just text;
-           * teach the syntax while the box is empty so it's discoverable. */
+          /* In the table a `$.field` query doesn't hide rows — it counts matching
+           * messages per service (see Agg), so label that scope distinctly. */
+          const fieldTable = !isInspecting() && searchHasFields();
+          const scope = isInspecting() ? "messages" : fieldTable ? "matches" : "connections";
+          /* The query is a field language, not just text; teach the syntax while
+           * the box is empty (both scopes support it) so it's discoverable. */
           const hint =
-            isInspecting() && !q
+            !q
               ? "  text, or a field test: $.price>100  ·  $.type==\"trade\"  ·  $.error"
-              : active
-                ? "   enter: keep · esc: clear"
-                : "   esc: clear";
+              : fieldTable
+                ? "   matching messages per service →   ·   esc: clear"
+                : active
+                  ? "   enter: keep · esc: clear"
+                  : "   esc: clear";
           return [
             pipe(`  /${scope} `, fg(COL.accent), bold),
             fg(COL.ink)(q),
