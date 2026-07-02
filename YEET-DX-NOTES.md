@@ -134,7 +134,6 @@ reality · **[uncatchable]** can't be handled from JS.
 ---
 
 ## Tooling / run mechanics
-DEFERRED
 
 ### 12. Bare `--bin node` won't attach; needs an absolute path
 - **Symptom:** `Could not resolve uprobe attach target: node`.

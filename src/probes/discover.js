@@ -21,6 +21,16 @@ import { containerOf } from "../lib/container.js";
 
 const base = (p) => (p || "").split("/").pop() || "";
 
+/* Does a process running `exe` (comm `comm`) count as runtime `name`? A bare
+ * exe basename match, OR a *versioned* one — a real interpreter's exe resolves
+ * to `python3.13` / `ruby3.3`, not `python3` — so `name` followed by only
+ * digits/dots also matches. comm is a fallback (it can be renamed, e.g. a
+ * worker that set its process title). */
+const nameMatches = (exe, comm, name) => {
+  const b = base(exe);
+  return b === name || (b.startsWith(name) && /^[0-9.]+$/.test(b.slice(name.length))) || comm === name;
+};
+
 export const DEFAULT_BIN = "libssl.so";
 
 /* Runtimes whose TLS is worth tracing out of the box, so `--bin` is only needed
@@ -62,7 +72,7 @@ async function sslForPid(pid, graph) {
 /* The pid of a running process whose exe-basename or comm matches `name`. */
 async function pidForName(name, graph) {
   const { data } = await graph.query(`{ procs { stat { pid comm } exe } }`);
-  const hit = (data?.procs || []).find((p) => (p.exe && base(p.exe) === name) || p.stat?.comm === name);
+  const hit = (data?.procs || []).find((p) => nameMatches(p.exe, p.stat?.comm, name));
   return hit?.stat?.pid ?? null;
 }
 
@@ -71,7 +81,7 @@ async function pidForKnownRuntime(graph) {
   const { data } = await graph.query(`{ procs { stat { pid comm } exe } }`);
   const procs = data?.procs || [];
   for (const name of KNOWN_BINS) {
-    const hit = procs.find((p) => (p.exe && base(p.exe) === name) || p.stat?.comm === name);
+    const hit = procs.find((p) => nameMatches(p.exe, p.stat?.comm, name));
     if (hit?.stat?.pid != null) return hit.stat.pid;
   }
   return null;
@@ -102,7 +112,7 @@ export async function discoverTargets(graph = defaultGraph()) {
   const byBinary = new Map();
   for (const p of data?.procs || []) {
     const exe = p.exe || "";
-    const runtime = KNOWN_BINS.find((n) => base(exe) === n || p.stat?.comm === n);
+    const runtime = KNOWN_BINS.find((n) => nameMatches(exe, p.stat?.comm, n));
     if (!runtime) continue;
     const cid = containerOf(p.cgroups);
     const key = `${cid ?? ""}\0${exe}`;

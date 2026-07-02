@@ -418,6 +418,13 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
     "--bin ruby matches by comm",
   );
   await R({ bin: "nope" }, { procs: [{ stat: { pid: 5, comm: "node" }, exe: "/usr/bin/node" }], want: DEFAULT_BIN }, "--bin unmatched → default");
+  // a versioned interpreter whose comm was renamed (worker set its title): the
+  // exe basename python3.13 still matches KNOWN_BINS' "python3".
+  await R(
+    {},
+    { procs: [{ stat: { pid: 6, comm: "risk-engine" }, exe: "/usr/bin/python3.13" }], byPid: { 6: { exe: "/usr/bin/python3.13", maps: [{ path: "/lib/libssl.so.3" }] } }, want: "/proc/6/root/lib/libssl.so.3" },
+    "no args → versioned python3.13 (renamed comm) still discovered",
+  );
 
   // no args: pick the first running known runtime, in KNOWN_BINS order (node
   // before python), then its SSL path.

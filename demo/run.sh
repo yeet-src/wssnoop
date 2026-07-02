@@ -21,6 +21,12 @@ cd "$DEMO_DIR"
 . "$HOME/.nvm/nvm.sh" 2>/dev/null || true
 
 ROLES=(order-router md-gateway risk-engine)
+# One role runs on a SECOND runtime (Python, via worker.py) instead of node, so
+# the demo shows two distinct SSL binaries: node (static — probe the exe) and
+# python3 (dynamic — probe the mapped libssl). This is what exercises
+# multi-runtime binary discovery. Python's feeds skip poly (its worker has no
+# REST-catalog prime step).
+PY_ROLE=risk-engine
 
 usage() {
   cat <<'EOF'
@@ -175,7 +181,7 @@ status() {
     fi
   done
   if [[ "$any" == 1 ]]; then
-    echo ">> attach wssnoop (sees all workers — no --pid needed):"
+    echo ">> attach wssnoop to the node workers (--bin node); $PY_ROLE is python (dynamic libssl):"
     echo ">>     $YEET run src/main.jsx -- --bin ${NODE:-node}"
   else
     echo ">> no workers running — start them with ./demo/run.sh start"
@@ -208,10 +214,16 @@ start_workers() {
   for r in "${ROLES[@]}"; do
     # Default: no recycle — --attach already gives clean handshakes, so steady
     # feeds make a calmer demo. Pass --recycle <ms> to exercise reconnect churn.
-    # setsid execs node in place, so $! is the node worker's own pid.
-    setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
-      --recycle "$RECYCLE" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
-      >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
+    # setsid execs the runtime in place, so $! is the worker's own pid.
+    if [[ "$r" == "$PY_ROLE" ]]; then
+      setsid python3 worker.py --role "$r" --feeds coinbase,kraken --delay "$delay" \
+        --recycle "$RECYCLE" \
+        >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
+    else
+      setsid node worker.mjs --role "$r" --feeds coinbase,kraken,poly --delay "$delay" \
+        --recycle "$RECYCLE" ${NODEFLATE:+--no-deflate} ${ABRUPT:+--abrupt} \
+        >"/tmp/wssnoop-$r.log" 2>&1 </dev/null &
+    fi
     echo "$!" >> "$PIDFILE"
   done
 }
@@ -235,9 +247,11 @@ fi
 # --start
 start_workers 0
 sleep 1
-echo ">> ${#ROLES[@]} workers up: ${ROLES[*]}"
-echo ">> each holds coinbase + kraken + polymarket connections, churning subscriptions"
+echo ">> ${#ROLES[@]} workers up: ${ROLES[*]} ($PY_ROLE on python3, the rest on node)"
+echo ">> node workers hold coinbase + kraken + polymarket; $PY_ROLE (python) holds coinbase + kraken"
 echo ">> logs: /tmp/wssnoop-<role>.log"
 echo ">>"
-echo ">> attach wssnoop (sees all workers — no --pid needed):"
+echo ">> attach wssnoop to the node workers (static SSL — probe the exe):"
 echo ">>     $YEET run src/main.jsx -- --bin $NODE"
+echo ">> $PY_ROLE runs on python (dynamic libssl); attach it separately, e.g.:"
+echo ">>     $YEET run src/main.jsx -- --pid \$(pgrep -x $PY_ROLE)"
