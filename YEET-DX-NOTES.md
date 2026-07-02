@@ -15,138 +15,6 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ## yeet:tui / JSX
 
-### 2. Multi-span styled text has no clean prop form
-- **Symptom:** A line like `[fg(out)("↑"), fg(dim)(n), fg(role)(name)]` (per-span
-  colours inside one `<Text>`) can't be expressed with bare attrs — attrs style
-  the *whole* Text.
-- **Cause:** `face` merges *under* each span and inner `<Text>` wins on conflict,
-  so the only prop-form alternative is nesting `<Text fg=…>` runs as array
-  children — verbose for dense one-liners.
-- **Workaround:** Keep `face(patch)` (the non-deprecated escape hatch) for
-  per-span runtime colours; reserve bare attrs for uniformly-styled nodes.
-- **Suggested fix:** Nested <Text> should work to fix this... actually,
-wait, shouldn't this *already work*?? Verify it!
-- **Fixed:** Verified already working — nested `<Text fg=…>` array children
-  give per-span colours, each painting its own cell. Locked in with a
-  regression test (`a89f10d2`, branch `ben/dx-fixes-for-wssnoop`).
-
-### 16. A text leaf wears its CONTAINER's `break`, not the `<Text>`'s **[silent]**
-- **Symptom:** `<Box {...tip}><Text break="none">{thunk}</Text></Box>` wrapped a
-  one-line status, but at narrow widths the text **word-wrapped and bled
-  vertically** into the rows below — garbled overlap, not clipping.
-- **Cause:** A container promotes a child run to a text leaf "wearing the
-  *container's* `break`" (`module.js` `leafOf`/`container`). The wrapper `<Box>`
-  had no `break`, so it defaulted to word-wrap — the inner `<Text break="none">`
-  was ignored for wrapping. Nothing warns; it only shows when the box is forced
-  narrow.
-- **Suggested fix:** Make `<Text break>` authoritative for its own run
-- **Fixed:** `break`/`overflow` now split off the span face and ride the run to
-  the leaf it's promoted to, winning over the container's default (`f89eed21`).
-
-### 21. A function `bg` (the `(x,y,w,h)=>color` shader) silently doesn't paint **[silent]**
-- **Symptom:** `<Box bg={(x,y,w,h)=>...}/>` rendered with **no fill** — the cells
-  kept the surface color underneath, as if `bg` were absent. No error. A static
-  string `bg` (incl. 8-digit `#RRGGBBAA` rgba) on the same box paints fine.
-  Wanted a 1-col scrollbar whose thumb/track varied by row via the shader; the
-  column stayed the panel color (verified by reading the captured `48;2;r;g;b`).
-- **Cause:** Unconfirmed — `props()` passes a function `bg` through as a raw
-  shader fn (not unwrapped like a signal), but the paint pass doesn't appear to
-  invoke it (or expects a different arity/return). The docs advertise
-  `bg: color | (x,y,w,h)=>color`, so this is a doc-vs-behavior gap at minimum.
-- **Suggested fix:** Fix the shader functions, they seem to just be
-broken. Make sure there's a test so this doesn't regress again.
-- **Fixed:** Verified painting — a function `bg` reaches paint via `common()`'s
-  `color()` coercion and `baked()`, so it varies per cell (incl. the one-col
-  scrollbar). Locked in with a regression test (`81c23fa2`). If your build
-  showed no fill, it predates the wiring; rebuild the daemon.
-
-### 20. A `CellBuffer` is not occluded by boxes drawn over it **[silent]**
-- **Symptom:** An opaque, higher-`z` `Box` (with `bg` + `border`) placed over a
-  `CellBuffer` does **not** hide it — the buffer's glyphs bleed through the
-  panel's empty cells. An overlay panel laid over a sparkline shows the bars
-  *interleaved with the panel's own text* (`▀▀⊙ focus▀▀● live`). Reproduced
-  minimally: a `bg:"#11161f"` bordered box over a `▀`-filled buffer renders
-  `│OPAQUE PANEL▀▀▀▀▀▀│` — the border + text win, the interior bg does not.
-- **Cause:** The renderer composites `CellBuffer` planes in a pass that a box's
-  background fill doesn't clear. The rule observed: a **non-space glyph** at
-  higher z wins (panel text occludes), but a **space** at higher z is treated as
-  transparent, so the buffer's glyph below shows through. A `bg` color is not a
-  glyph, so it never occludes the buffer.
-- **Suggested fix:** Composite buffer planes within the normal z-stack so an
-  opaque box's `bg` clears the cells beneath it (or expose an `opaque`/clear flag
-  on the covering box).
-- **Fixed:** `paint`'s bg fills now occlude — a fully-covered opaque cell has its
-  glyph cleared; translucent/faded fills still only veil. The imperative
-  `tint`/`Buffer.tint` (veil-only) semantics are unchanged (`f584eaa5`).
-
-### 22. A bare inline thunk child re-mounts its subtree every render pass **[silent]**
-- **Symptom:** A conditional child written as a bare thunk —
-  `{() => cond.get() ? <Panel/> : null}` — re-creates `<Panel>` on *every*
-  render pass of its container (≈ each heartbeat here), even when `cond` is
-  unchanged. Per-node local state is silently reset on that cadence: a
-  `setHover` boolean never sticks, a `signal()` declared in the component body
-  resets ~2×/s. Confirmed with a module-level mount counter (1 → climbing 2/s).
-- **Cause:** No stable node identity / reconciliation (it's signals, not a
-  vdom). A bare thunk is re-invoked by the framework whenever its container
-  re-renders and mints a fresh element each time; the old node (and its local
-  signals) is discarded.
-- **Workaround:** Memoize the node in a `computed` so it recomputes only when a
-  *read* signal changes, keeping the element reference stable:
-  `const panel = computed(() => cond.get() ? <Panel/> : null)` then `{panel}`.
-  The subtree then mounts once and its own internal thunks drive liveness.
-  (wssnoop did this for the inspector; its buttons' local hover now persists,
-  removing a module-keyed-hover workaround.) For state that must outlive a
-  genuine remount, hoist it to a module-level signal keyed by identity.
-- **Suggested fix:** Either memoize bare thunk children by referential equality
-  of their result, or document that conditional/dynamic children belong in a
-  `computed`, not a bare thunk.
-	(Yeah thunks -> computeds should always be memoized, if i'm understanding this issue right -- Ben)
-- **Fixed:** Bare thunk children (the array-child shape JSX gives multiple kids)
-  are now memoized to a stable `computed` keyed by fn identity, so the subtree
-  mounts once and its local signals persist across sibling re-projection
-  (`32ebe54a`).
-
-### 23. A fit-width flow row omits `gap` from its own width, clipping the tail **[silent]**
-- **Symptom:** A `<Box direction="row" gap=N>` sized `fit` under-reports its width
-  by `N*(children-1)`, so `overflow:hidden` clips the last child(ren). Worse next
-  to a `1fr` spacer, which over-grows into the phantom free space and shoves the
-  row off the right edge. Hit in wssnoop's toolbar: the `search sort role idle
-  rows ‹ win ›` cluster clipped `rows`/`win`/`?` at every width.
-- **Cause:** Pass-1 intrinsic measure folded children with a gap-less sum while
-  pass-2 layout inserts the gap, so a fit container's width = Σchildren but its
-  content occupies Σchildren + gap·(n−1).
-- **Workaround:** Moved the `?` button left of the `1fr` spacer, where layout is
-  stable.
-- **Fixed:** Source fixed in yeet master (`d41258ca`, "Handle gap in a tui layout
-  intrinsic computation") — flow mode folds with gaps; `overlap` still ignores
-  gap. Regression test at `layout/module.test.js` ("A fit stack reserves gap
-  between children, so its last child fits"). NB the dev VM daemon must be
-  rebuilt to carry it — a version-string bump does not imply the commit is in the
-  build. See `~/notes/yeet-tui-flow-gap-intrinsic-width.md`.
-- **Update 2026-07-01 (daemon now on 0.19.5 with the fix, verified live):** the
-  gap fix works for a plain fit row (`clip.jsx`: all gaps now fit). BUT the
-  toolbar still clips: a **fit cluster beside a `1fr` spacer** under-measures
-  independently of gap — the `1fr` over-grows into the phantom slack and shoves
-  the cluster off the right edge (reproduced live at 200 AND 280 cols, static or
-  thunk widths, gap-fix present). So this is a *second, still-open* layout bug;
-  the `?` button stays left of the spacer. Workaround if you need the cluster
-  right-aligned and complete: give it an explicit `width` (a fixed-width sibling
-  of a `1fr` is measured correctly) rather than relying on `fit`.
-- **Correction 2026-07-01 (NOT an engine bug — a wssnoop usage bug):** ran the
-  toolbar shape through the layout engine headlessly (yeet
-  `module.test.js` / `layout/module.test.js`). A `fit` cluster beside a `1fr`
-  spacer measures **correctly** in every variant — plain, padded
-  (padding→frame→zstack), and the real padded + thunk-width button: it hugs
-  content + gaps and sits flush at the right edge, the spacer taking the slack.
-  The live clip is because **our cluster has no `width`, so it defaults to
-  `fr(1)`** (a bare `<Box>` is `fr(1)`, not `fit`); it then takes a flex share
-  too small for its buttons, which overflow `overflow:hidden`. **Fix: set
-  `width="fit"` on the cluster** (`toolbar.jsx`), then the `?` button can move
-  back in. No engine change needed; the "fit/auto-width under-measures" and
-  "adjacent auto-width boxes drop their gap" claims above are disproven by the
-  regression tests (gaps ARE reserved: 54 content + 5 gaps = 59). Two tests lock
-  this in on `ben/dx-fixes-for-wssnoop`.
-
 ### 24. A signal read in the JSX *body* binds at mount; a later identity swap is missed **[silent]**
 - **Symptom:** the ALL-row aggregate `<Agg hist={ghist.get()} …/>` froze at
   `↑0B ↓0B` while every per-process header — fed the same kind of live hist —
@@ -173,21 +41,39 @@ broken. Make sure there's a test so this doesn't regress again.
 
 ## Runtime / isolate
 
-### 6. No `Intl` / `TextDecoder` / `TextEncoder`
-- Documented (gotcha 1) but still the first wall every formatting/decoding task
-  hits. `toLocaleString`, `localeCompare`, `Intl.*`, `new TextDecoder()` all
-  throw. Hand-roll everything. *Suggested fix:* ship a minimal `TextDecoder`
-  (`utf-8` at least) — byte→string is needed by virtually every BPF script.
-- **Fix**: Make sure yeet:text is at least minimally documented in ../docs.
-- **Fixed (docs):** `yeet:tui:text` now documented in ../docs — measurement,
-  wrapping/truncation, and `toUTF8`/`toUTF16`/`toUTF32` encoders; the runtime
-  reference's TextEncoder/TextDecoder note points there (docs `d369eb8`). The
-  runtime still ships no `TextDecoder`; the encoders cover string ↔ bytes.
+### 27. `yeet.exit()` during a pending top-level await paints a spurious error **[cosmetic]**
+- **Symptom:** a self-test that parks on `await new Promise(() => {})` and later
+  calls `yeet.exit(0)` from a timer exits, but the daemon then paints
+  `V8_EVALUATE_ERROR — Module evaluate failed: pending module evaluation should
+  not be discarded` over the clean output. The real output printed fine; the RC
+  is nonzero purely from this.
+- **Cause:** exiting while the module's top-level evaluation promise is still
+  pending; the isolate tears down mid-eval and reports the discarded evaluation.
+- **Workaround:** cosmetic — ignore it, or resolve the parking promise before
+  exiting instead of calling `yeet.exit()` under it.
+- **Suggested fix:** treat an explicit `yeet.exit()` as a clean shutdown that
+  cancels (not errors) a pending top-level evaluation.
 
 ---
 
 ## BPF
-	- DEFERED, don't work on this section rn.
+
+### 26. `start()` rejects an object if any uprobe program lacks attach opts **[doc-gap]**
+- **Symptom:** loading the tap object to use *only* its kernel-global probes
+  (bind the discovery ringbuf, skip the SSL uprobe `attach()` calls) fails at
+  `start()`: `Invalid attach opts for program 'probe_ssl_write': No attach opts
+  provided`. There's no way to attach a subset of an object's programs.
+- **Cause:** kprobe/fentry/fexit programs auto-attach from their ELF section,
+  but a uprobe can't (it has no target), so every uprobe program in the object
+  is mandatory — `start()` won't load the object while one is unattached.
+- **Workaround:** put kernel-global-only work in its **own** object. wssnoop's
+  layer-1 discovery (`discover.bpf.c` → `bin/discover.bpf.o`, tcp_connect +
+  tcp_close) is a separate object from the SSL tap for exactly this reason, so it
+  loads with no uprobe to satisfy. (A single-unit object with 2 programs loads
+  and captures fine — the #7 single-*program* relocation issue did not recur.)
+- **Suggested fix:** allow attaching a subset (skip/disable an unattached uprobe
+  program) instead of rejecting the whole object, or document that a mixed
+  uprobe + kernel-global object is all-or-nothing.
 
 ### 7. Single-program `bpftool gen object` silently captures nothing **[silent]**
 - **Symptom:** An egress-only object built with one program (`-DEGRESS_ONLY`,
@@ -303,16 +189,3 @@ DEFERRED
 - Migrated combinators → `<Text>` attrs / `face()` (#1) where the style is uniform.
 - Automatic bin discovery: `--bin node` (bare) or `--pid N` resolves the SSL
   binary from the process graph (#12).
-
-## Resolved: the memory-pressure death (was: "hard death under churn")
-The churn death — `./demo/run.sh start --recycle 6000` killing the worker ~6–8 s
-in — traced to two daemon bugs now fixed on `ben/daemon-fixes`: V8 GC never
-finalized for a timer-only TUI so old-gen climbed to the heap ceiling
-(`22e05828`), and the signal graph retained every unwatched sink, leaking
-~33 MiB/min (`5c621ce7`). Heap exhaustion is now a clean force-terminate +
-dispose (`78a7d6dc`, `8ee4f26d`) rather than a hard worker death. The wssnoop
-mitigations (smaller capture chunk, CellBuffer sparklines, O(1) message ring,
-json-on-demand) still help but were treating a symptom.
-**To do:** re-run the `--recycle 6000` churn soak on the rebuilt daemon; if it
-holds, the residual of #4 is only the *genuine* native-fault case (no in-JS
-hook), and this note can go entirely.
