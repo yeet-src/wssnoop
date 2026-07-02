@@ -475,7 +475,7 @@ export function createSession({ binWide = null, debug = false, plaintext = false
         .map((t) => t.bin && t.bin.split("/").pop())
         .filter(Boolean);
       const live = taps.size + (binWideTap ? 1 : 0);
-      if (live === 0) return status.set("idle · press c to pick a process to decode");
+      if (live === 0) return status.set("idle · c to pick");
       status.set(`tracing · ${names.length ? [...new Set(names)].join(", ") : `${live} process(es)`}`);
     };
 

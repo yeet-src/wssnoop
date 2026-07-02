@@ -59,7 +59,10 @@ export default function Browser() {
             }
             rows.push({ pid, arr, runtime, id });
           }
-          rows.sort((a, b) => b.arr.length - a.arr.length);
+          /* Stable order by pid — a busy process gaining connections must not
+           * reshuffle rows under the pointer (arming would land on the wrong
+           * one). pid is fixed for a process's life, so the list stays put. */
+          rows.sort((a, b) => a.pid - b.pid);
 
           if (rows.length === 0) {
             return (
