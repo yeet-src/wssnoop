@@ -36,6 +36,7 @@ import { computed, from, signal } from "yeet:tui";
 import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE, TRANSPORT_TCP } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
+import { subscribeFrames, armPlaintext, disarmPlaintext } from "./probes/netconn.js";
 import { focusKey, clearFocus, selectedConn, armedPids } from "./controls.js";
 
 /* Idle eviction: a conn silent this long is dropped to free its scrollback. We
@@ -258,6 +259,11 @@ export function createRegistry({ onDrop } = {}) {
     for (const key of [...g.conns.keys()]) dropConn(key);
   };
 
+  /* Has this pid produced any decodable WebSocket connection? The plaintext
+   * fallback uses it: an armed pid that shows nothing decodable in the grace
+   * window isn't plaintext ws (its wire bytes are ciphertext), so stop capturing. */
+  const hasPid = (pid) => groups.has(pid);
+
   /* Record `bytes` of flow in direction `dir` across conn / process / global
    * histograms at time `now`. */
   const addFlow = (c, g, now, dir, bytes) => {
@@ -425,7 +431,7 @@ export function createRegistry({ onDrop } = {}) {
     const c = conns.get(key);
     return !c || c.status === "closed" || c.truncated;
   };
-  return { ingest, evict, snapshot, focusGone, dropPid };
+  return { ingest, evict, snapshot, focusGone, dropPid, hasPid };
 }
 
 const emsg = (e) => (e && e.message ? e.message : e);
@@ -460,6 +466,18 @@ export function createSession({ binWide = null, debug = false } = {}) {
       }
     };
 
+    /* The plaintext (ws://) stream from the socket object folds into the SAME
+     * decoder as the SSL taps — a record's transport tag is all that differs.
+     * One subscription serves every plaintext-armed pid (demuxed by pid+sock);
+     * membership is the kernel-side focus set, toggled per pid below. */
+    const framesUnsub = subscribeFrames(onEvent);
+
+    /* If an armed pid shows no decodable ws within this window after we fall back
+     * to plaintext, its wire bytes aren't plaintext ws (an in-process-TLS client
+     * on a non-OpenSSL stack — Go/rustls — is ciphertext here), so stop emitting
+     * them: bounds the wasted capture to a short burst and marks the pid opaque. */
+    const GRACE_MS = 8000;
+
     /* The live taps, one per armed pid, reconciled against controls.armedPids
      * each heartbeat. Each entry owns its probe session (its own focus map and
      * teardown). `binWideTap` is the separate --bin escape hatch: a single tap
@@ -470,13 +488,19 @@ export function createSession({ binWide = null, debug = false } = {}) {
     const refreshStatus = () => {
       const errs = [...taps.values()].map((t) => t.err).filter(Boolean);
       if (errs.length) return status.set(`tap fault: ${errs[0]}`);
+      const live = taps.size + (binWideTap ? 1 : 0);
+      if (live === 0) return status.set("idle · c to pick");
       const names = [...taps.values(), binWideTap]
         .filter(Boolean)
         .map((t) => t.bin && t.bin.split("/").pop())
         .filter(Boolean);
-      const live = taps.size + (binWideTap ? 1 : 0);
-      if (live === 0) return status.set("idle · c to pick");
-      status.set(`tracing · ${names.length ? [...new Set(names)].join(", ") : `${live} process(es)`}`);
+      const plaintext = [...taps.values()].filter((t) => t.plaintext).length;
+      const opaque = [...taps.values()].filter((t) => t.opaque).length;
+      const parts = [];
+      if (names.length) parts.push([...new Set(names)].join(", "));
+      if (plaintext) parts.push(`${plaintext} plaintext`);
+      if (opaque) parts.push(`${opaque} opaque`);
+      status.set(`tracing · ${parts.length ? parts.join(" · ") : `${live} process(es)`}`);
     };
 
     /* Push the current capture focus into one tap. Each probe object has its own
@@ -501,8 +525,28 @@ export function createSession({ binWide = null, debug = false } = {}) {
       applyFocus(binWideTap, null);
     };
 
+    /* The SSL uprobe couldn't attach (a non-OpenSSL process: no libssl, or the
+     * symbols aren't in the exe — Go, rustls, stripped static). Fall back to the
+     * socket-layer plaintext tap for this pid. If it's really plaintext ws://
+     * we'll decode it; if it's in-process TLS on a non-OpenSSL stack the bytes
+     * are ciphertext and the grace guard shuts the capture off as opaque. */
+    const fallbackToPlaintext = (pid, entry) => {
+      if (entry.stopped || entry.plaintext) return;
+      entry.plaintext = true;
+      armPlaintext(pid);
+      entry.guard = setTimeout(() => {
+        if (entry.stopped) return;
+        if (!reg.hasPid(pid)) {
+          disarmPlaintext(pid);
+          entry.plaintext = false;
+          entry.opaque = true; /* encrypted on the wire, non-OpenSSL — can't decode */
+          refreshStatus();
+        }
+      }, GRACE_MS);
+    };
+
     const startTap = (pid) => {
-      const entry = { stop: () => {}, setFocus: null, bin: null, err: null, stopped: false };
+      const entry = { stop: () => {}, setFocus: null, bin: null, err: null, stopped: false, plaintext: false, opaque: false, guard: null };
       taps.set(pid, entry);
       snoop({
         pid,
@@ -517,7 +561,9 @@ export function createSession({ binWide = null, debug = false } = {}) {
           applyFocus(entry, pid);
           refreshStatus();
         })
-        .catch((e) => ((entry.err = emsg(e)), refreshStatus()));
+        /* Not a fault — an unattachable uprobe is the expected non-OpenSSL case;
+         * route to the plaintext tap instead of surfacing an error. */
+        .catch(() => (fallbackToPlaintext(pid, entry), refreshStatus()));
     };
 
     const stopTap = (pid) => {
@@ -525,6 +571,8 @@ export function createSession({ binWide = null, debug = false } = {}) {
       if (!entry) return;
       taps.delete(pid);
       entry.stopped = true;
+      if (entry.guard) clearTimeout(entry.guard);
+      if (entry.plaintext) disarmPlaintext(pid);
       entry.stop();
       reg.dropPid(pid); /* its rows leave the table now, not a window later */
       refreshStatus();
@@ -597,8 +645,11 @@ export function createSession({ binWide = null, debug = false } = {}) {
 
     return () => {
       clearInterval(beat);
-      for (const entry of taps.values()) {
+      framesUnsub();
+      for (const [pid, entry] of taps) {
         entry.stopped = true;
+        if (entry.guard) clearTimeout(entry.guard);
+        if (entry.plaintext) disarmPlaintext(pid);
         entry.stop();
       }
       binWideTap?.stop();

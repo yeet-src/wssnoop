@@ -92,6 +92,25 @@ reality · **[uncatchable]** can't be handled from JS.
   nested under an `opts` key are ignored with no error. *Suggested fix:* reject
   unknown top-level keys / warn on an `opts` object.
 
+### 29. Map `.bind()` kind spellings are underscore/compact, not the hyphens the docs show — and an unknown kind is silently unbound **[silent]** **[doc-gap]**
+- **Symptom:** `.bind("focus_pids", { kind: "hash-map" })` (the spelling in
+  CLAUDE.md's kind list) loaded fine, but the first `HashMap.update` rejected
+  with `No map service for map: focus_pids`. The map was never served.
+- **Cause:** the daemon's bind-kind parser (`translate_bind_spec`) accepts
+  `hashmap | hash_map | hash` — **not** `hash-map`. The hyphenated forms in the
+  docs (`hash-map`, `lru-hash-map`, …) match the *module* names
+  (`yeet:bpf:hash-map`) and the JS class import, but not the bind `kind` string.
+  Worse, an unrecognized kind doesn't fail `start()` — the map is just silently
+  not registered as a KV service, so the failure only surfaces later at the
+  first map op, far from the actual mistake.
+- **Workaround:** use `kind: "hash_map"` (and `lru_hash_map`, `percpu_hash_map`,
+  `bloom` / `bloom_filter`, `lpm` / `lpm_trie`). `ringbuf`, `array`, `data`
+  match the docs.
+- **Suggested fix:** accept the hyphenated spellings as aliases (they're the
+  documented ones), or reject an unknown/aliased bind kind at `.start()` with a
+  clear error naming the map, instead of a silent no-service that only trips at
+  first use.
+
 ### 9. `__u64` map fields ↔ BigInt asymmetry
 - Ringbuf `__u64` arrive as BigInt (→ `NaN` the moment they touch `Number`
   math); writes need `BigInt(...)`; smaller ints take plain numbers. Documented
