@@ -66,6 +66,31 @@ const GO = {
   ],
 };
 
+/* rustls (tokio-tungstenite, any pure-Rust TLS). Its boundary symbols are
+ * mangled with a per-build codegen hash the isolate can't resolve (no fs), so
+ * they're supplied explicitly — resolve with nm and pass them:
+ *
+ *   nm <bin> | grep -E 'PlaintextSink.*5write17h|take_received_plaintext'
+ *   yeet run … -- --rust-write <write-sym> --rust-read <read-sym>
+ *
+ * Absent → rustls simply isn't tapped and its pids degrade to opaque, as
+ * before. The symbols are per-binary, so this covers a single rustls target
+ * (the common --pid/--bin case); a multi-binary session would need per-binary
+ * symbols. libbpf resolves the mangled string daemon-side. */
+const rustSpec = () => {
+  const a = (typeof yeet !== "undefined" && yeet.args) || {};
+  const write = a["rust-write"];
+  const read = a["rust-read"];
+  if (!write || !read) return null;
+  return {
+    file: "rustprobe.bpf.o",
+    probes: [
+      ["probe_rust_tls_write", write],
+      ["probe_rust_tls_read", read],
+    ],
+  };
+};
+
 export async function snoop({ bin, pid, onEvent, onError, onBin }) {
   /* Discover where the SSL symbols live (path / library / process exe) before
    * attaching; report the resolved target so the UI can show what it hooked. */
@@ -123,8 +148,11 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
 
   /* Attach every boundary we can; a target offers some subset. If none bind,
    * throw so the caller falls back to the plaintext socket tap. */
+  const specs = [CLASSIC, EX, GO];
+  const rust = rustSpec();
+  if (rust) specs.push(rust);
   const taps = [];
-  for (const spec of [CLASSIC, EX, GO]) {
+  for (const spec of specs) {
     try {
       taps.push(await attachTap(spec));
     } catch {

@@ -262,12 +262,15 @@ arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
      `symbol + offset` uprobe supports exactly this.
 
 ### rustls (tokio-tungstenite, any pure-Rust TLS)
-- Hookable after all — it *does* keep concrete boundary symbols (they are not
-  fully inlined): egress `<rustls::conn::ConnectionCommon<T> as
-  ...PlaintextSink>::write(&mut self, buf: &[u8])` (arm64 X0=self, X1=ptr,
-  X2=len at entry — validated), ingress
-  `rustls::common_state::CommonState::take_received_plaintext` (returns the
-  bytes by value → return-ABI capture, harder). `&mut self` is a stable conn id.
+- Hookable after all, and *both directions are entry captures* (they are not
+  fully inlined). Egress: `<rustls::conn::ConnectionCommon<T> as
+  ...PlaintextSink>::write(&mut self, buf: &[u8])` — arm64 X0=self, X1=ptr,
+  X2=len. Ingress: `rustls::common_state::CommonState::take_received_plaintext`
+  — despite the "take" name it *receives* the just-decrypted app data (the
+  decrypt path hands it in), so the plaintext is an argument: X1 points to a
+  24-byte value laid out `{cap @ +0 (a 0x8000… marker), ptr @ +8, len @ +16}`
+  (found by dumping — not the naive Vec order; verify per build). `&mut self` is
+  the *same* pointer both hooks see, so egress and ingress fold into one conn.
 - The blocker is naming, not inlining: symbols are mangled *with a codegen hash*
   (`..PlaintextSink$GT$5write17h`**`c274a2dce4faded2`**`E`) that **changes every
   build**, so you can't hardcode the name. libbpf resolves it daemon-side from
@@ -284,7 +287,8 @@ arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
   without uretprobe. (`symbol + offset` already exists; this would automate the
   offset discovery.)
 - **Per-arch register reads from a uprobe** — g (X28), the sret pointer (X8),
-  raw argN — for ABI-specific extraction (goid, Rust by-value returns).
+  raw argN — for ABI-specific extraction (Go's goid; reaching past the first
+  few args once a runtime passes aggregates indirectly).
 - **Offset extraction from DWARF/pclntab** — `runtime.g.goid`, struct field
   offsets — so version-specific constants aren't hand-maintained.
 

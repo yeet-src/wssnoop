@@ -60,11 +60,13 @@ test_rust() {
   local pid sym
   pid="$(pgrep -x rust-worker | head -1)"
   [ -n "$pid" ] || { echo "rust-worker didn't start"; rc=1; return; }
-  # The rustls egress symbol carries a per-build codegen hash — resolve it now.
-  # ..PlaintextSink$GT$5write17h<hash>E — the 5write disambiguates from write_vectored.
-  sym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep -E 'PlaintextSink.*5write17h' | grep -v vectored | head -1)"
-  [ -n "$sym" ] || { echo "could not resolve rustls egress symbol"; rc=1; pkill -x rust-worker; return; }
-  run_probe "rustls" test/it-rustls.js --pid "$pid" --bin /tmp/rust-worker --sym "$sym"
+  # rustls symbols carry a per-build codegen hash — resolve both now.
+  # egress: ..PlaintextSink$GT$5write17h<hash>E (5write ≠ write_vectored).
+  local wsym rsym
+  wsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep -E 'PlaintextSink.*5write17h' | grep -v vectored | head -1)"
+  rsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep take_received_plaintext | head -1)"
+  [ -n "$wsym" ] && [ -n "$rsym" ] || { echo "could not resolve rustls symbols"; rc=1; pkill -x rust-worker; return; }
+  run_probe "rustls" test/it-rustls.js --pid "$pid" --bin /tmp/rust-worker --wsym "$wsym" --rsym "$rsym"
   pkill -x rust-worker 2>/dev/null
 }
 
