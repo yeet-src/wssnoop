@@ -5,7 +5,7 @@
 # kernel with cilium's little-vm-helper and mounts the project at /host; the
 # workflow stages the static veristat into bin/ before booting.
 #
-#   sh build/verify-kernel.sh [bpf-object]   (default: bin/probe.bpf.o)
+#   sh build/verify-kernel.sh [bpf-object ...]   (default: every bin/*.bpf.o)
 #
 # Set OUT_CSV=<path> to also write a machine-readable result (file,prog,verdict,
 # insns,states) — the workflow points it at the mounted workspace so the runner
@@ -18,7 +18,13 @@
 
 set -eu
 
-OBJ="${1:-bin/probe.bpf.o}"
+# Every loadable object by default (probe, probe_ex, goprobe, rustprobe,
+# socket) — the tap is split across several, and each must load on the kernel.
+if [ "$#" -gt 0 ]; then
+	set -- "$@"
+else
+	set -- bin/*.bpf.o
+fi
 VERISTAT="${VERISTAT:-./bin/veristat}"
 # verdict LAST so the gate below can match it at end-of-line. veristat's CSV
 # header uses each stat's canonical name, so the columns come out as
@@ -26,17 +32,17 @@ VERISTAT="${VERISTAT:-./bin/veristat}"
 COLS="file,prog,insns,states,verdict"
 
 [ -x "$VERISTAT" ] || { echo "error: veristat not found/executable at $VERISTAT" >&2; exit 1; }
-[ -f "$OBJ" ]      || { echo "error: BPF object not found at $OBJ" >&2; exit 1; }
+for o in "$@"; do [ -f "$o" ] || { echo "error: BPF object not found at $o" >&2; exit 1; }; done
 
 KREL="$(uname -r)"
-echo ">> kernel $KREL: loading $OBJ"
+echo ">> kernel $KREL: loading $*"
 
 # Human-readable table for the console log (full default columns).
-"$VERISTAT" "$OBJ" || true
+"$VERISTAT" "$@" || true
 
 # Machine-readable pass: the verdict column is the gate; the rest feeds the
 # workflow's summary table.
-csv="$("$VERISTAT" -o csv -e "$COLS" "$OBJ")"
+csv="$("$VERISTAT" -o csv -e "$COLS" "$@")"
 if [ -n "${OUT_CSV:-}" ]; then
 	mkdir -p "$(dirname "$OUT_CSV")"
 	printf '%s\n' "$csv" > "$OUT_CSV"

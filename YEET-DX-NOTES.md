@@ -217,6 +217,77 @@ reality · **[uncatchable]** can't be handled from JS.
 
 ---
 
+## Profiling language TLS runtimes (notes for a possible yeet helper)
+
+Where the plaintext of an in-process TLS connection crosses a boundary you can
+uprobe, per runtime. wssnoop hardcodes this per language; a general yeet
+"inspect runtime X" helper could own it. All validated on arm64 (aarch64),
+go1.24 / rustls 0.26 / OpenSSL 3 / CPython 3.13, kernel 6.x. Register notes are
+arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
+
+### OpenSSL family (node static, Python/Ruby dynamic, Rust native-tls, C/C++)
+- Hook `SSL_write`/`SSL_read` **and** `SSL_write_ex`/`SSL_read_ex`. This bit us:
+  Python captured *nothing* until we added the `_ex` pair — CPython's `_ssl`
+  calls `SSL_read_ex`/`SSL_write_ex` (OpenSSL 1.1.1+), never the classic API.
+  node/Rust-openssl/uSockets use the classic API. So a general OpenSSL profiler
+  must hook both families.
+- write: plaintext in the buffer arg at entry. read: buffer filled by return —
+  classic returns the byte count, `_ex` reports it via `size_t *readbytes` (deref
+  at the uretprobe). The `SSL*` (arg0) is a stable per-connection id.
+- Symbol location: a mapped `libssl` (dynamic) or the exe itself (static —
+  node/deno/bun bake it in). The graph exposes maps + exe, so this is decidable
+  without symbols, *except* a static exe under an unknown name reads as opaque.
+- `_ex` is absent from BoringSSL and pre-1.1.1 OpenSSL, and `start()` rejects an
+  object with any unattached uprobe (#26), so the two families must be separate
+  loadable objects attached best-effort — never folded into one.
+
+### Go crypto/tls (gorilla, net/http, anything on the stdlib)
+- No OpenSSL symbols at all. Hook `crypto/tls.(*Conn).Write` and `.Read` by
+  symbol — present in `.symtab` unless the binary is stripped, and the names
+  carry **no hash** (stable across builds, unlike Rust).
+- Register ABI (Go 1.17+): a method's receiver is arg0, a `[]byte` passes as
+  three words. On arm64 that lands X0=recv, X1=ptr, X2=len — the same registers
+  the C ABI uses, so `BPF_KPROBE` PARMs read them directly. Return value in X0.
+- Two Go-specific hazards, both real:
+  1. **Key entry↔return by goroutine id, not thread id.** `Read` blocks on the
+     network and Go can resume the goroutine on a different OS thread, so the
+     return fires on a different tid than entry. `goid` is stable. The g pointer
+     is in X28 (arm64); `goid` sits at a fixed offset in `runtime.g` (0xa0 for
+     go1.24 — version-specific, pull from DWARF; see demo/goworker/extract_goid).
+  2. **uretprobe vs moving stacks.** Go relocates goroutine stacks, which can
+     corrupt a uretprobe trampoline. In practice a plain uretprobe on `Read`
+     worked on go1.24 + kernel 6.x (worker stayed up, reads decoded clean), but
+     the safe general technique is uprobes placed at the function's `RET`
+     offsets (arm64 `ret` = `0xd65f03c0`; scan the symbol's bytes). The daemon's
+     `symbol + offset` uprobe supports exactly this.
+
+### rustls (tokio-tungstenite, any pure-Rust TLS)
+- Hookable after all — it *does* keep concrete boundary symbols (they are not
+  fully inlined): egress `<rustls::conn::ConnectionCommon<T> as
+  ...PlaintextSink>::write(&mut self, buf: &[u8])` (arm64 X0=self, X1=ptr,
+  X2=len at entry — validated), ingress
+  `rustls::common_state::CommonState::take_received_plaintext` (returns the
+  bytes by value → return-ABI capture, harder). `&mut self` is a stable conn id.
+- The blocker is naming, not inlining: symbols are mangled *with a codegen hash*
+  (`..PlaintextSink$GT$5write17h`**`c274a2dce4faded2`**`E`) that **changes every
+  build**, so you can't hardcode the name. libbpf resolves it daemon-side from
+  the string, so you only need to hand it the current mangled name — which means
+  resolving it per-target (nm/`.symtab`). Rust threads don't migrate mid-call,
+  so pid_tgid keying is fine and uprobe/uretprobe are safe.
+
+### What a general yeet helper would want
+- **Symbol resolution that tolerates Rust hashes** — match by demangled name or
+  a `..write17h`-style prefix, so a caller needn't know the per-build hash. This
+  is the single thing that would turn rustls from "targeted" into "general".
+- **Attach-at-all-RETs of a symbol** — scan the symbol's bytes for the arch
+  `ret` opcode and attach at each offset; the safe way to capture a Go return
+  without uretprobe. (`symbol + offset` already exists; this would automate the
+  offset discovery.)
+- **Per-arch register reads from a uprobe** — g (X28), the sret pointer (X8),
+  raw argN — for ABI-specific extraction (goid, Rust by-value returns).
+- **Offset extraction from DWARF/pclntab** — `runtime.g.goid`, struct field
+  offsets — so version-specific constants aren't hand-maintained.
+
 ## What we changed in wssnoop because of the above
 - Per-event memory pressure (#4) drove the <1 min crash: smaller capture chunk,
   CellBuffer sparklines, O(1) message ring, json-on-demand. This made the

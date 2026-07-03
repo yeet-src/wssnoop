@@ -14,6 +14,7 @@ import { rankMap, recentBytes, connMetric } from "../src/lib/rank.js";
 import { fmtBytes, fmtAgo, jsonTokens, hexDump } from "../src/lib/format.js";
 import { compile, messageText } from "../src/lib/query.js";
 import { resolveBin, discoverTargets, sslClass, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
+import { classify, profileFor, KNOWN_BINS } from "../src/probes/runtimes.js";
 
 let pass = 0;
 let fail = 0;
@@ -457,6 +458,25 @@ const evt = (data, extra = {}) => ({ pid: 1, tid: 1, ssl: 7n, dir: DIR_READ, ts:
   C({ exe: "/usr/bin/node", comm: "node" }, "runtime", "missing maps tolerated → runtime hint");
   // neither: Go's crypto/tls, rustls, a stripped static build.
   C({ exe: "/app/feed", comm: "feed", maps: ["/lib/libc.so.6"] }, "opaque", "no libssl, unknown runtime → opaque");
+}
+
+/* ==== runtime registry (probes/runtimes.js) ========================== */
+{
+  // KNOWN_BINS is derived from RUNTIMES, node-first (a no-args launch prefers it).
+  eq(KNOWN_BINS, ["node", "deno", "bun", "python3", "python", "ruby"], "KNOWN_BINS derived from RUNTIMES, in order");
+  eq(profileFor("/usr/bin/node", "node")?.id, "node", "profileFor matches node by exe");
+  eq(profileFor("/usr/bin/python3.13", "worker")?.id, "python", "profileFor matches versioned python3.13");
+  eq(profileFor("/app/gateway", "gateway"), null, "profileFor is null for an unknown exe");
+
+  const C = (o, want, msg) => eq(classify(o), want, msg);
+  // a mapped libssl is decodable whatever the language; a known runtime enriches the label.
+  C({ exe: "/app/gateway", comm: "gw", maps: ["/lib/libssl.so.3"] }, { label: "libssl", tap: "libssl", decodable: true }, "unknown exe + libssl → decodable, generic label");
+  C({ exe: "/usr/bin/python3.13", comm: "worker", maps: ["/lib/libssl.so.3"] }, { label: "python", tap: "libssl", decodable: true }, "python + libssl → labeled python");
+  // node bakes OpenSSL into the exe (static) — decodable via the exe tap.
+  C({ exe: "/usr/bin/node", comm: "node", maps: [] }, { label: "node", tap: "exe", decodable: true }, "node (no libssl) → exe tap, decodable");
+  // unknown, no libssl: could be a static-OpenSSL C++/Rust exe or Go/rustls —
+  // decodable is null (unknown), the browser offers it as a TLS candidate.
+  C({ exe: "/app/feed", comm: "feed", maps: ["/lib/libc.so.6"] }, { label: null, tap: "unknown", decodable: null }, "unknown, no libssl → unknown candidate");
 }
 
 /* ==== target enumeration (discover.discoverTargets) ================== */

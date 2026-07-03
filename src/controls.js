@@ -214,6 +214,16 @@ export const disarm = (pid) => {
 };
 export const toggleArm = (pid) => (isArmed(pid) ? disarm(pid) : arm(pid));
 
+/* The attach-and-see outcome per armed pid, written by state.js as the tap
+ * settles: "tls" (SSL uprobe bound, decoding), "plaintext" (fell back to the
+ * socket tap and it's decoding ws://), or "opaque" (neither — ciphertext from a
+ * non-OpenSSL stack: Go/rustls/stripped). The browser reads it to degrade a
+ * row honestly ("can't decode") instead of leaving a blank pane. A pid absent
+ * from the map is still settling. */
+export const tapOutcome = signal({});
+export const setTapOutcome = (pid, outcome) => tapOutcome.update((m) => (m[pid] === outcome ? m : { ...m, [pid]: outcome }));
+export const clearTapOutcome = (pid) => tapOutcome.update((m) => (pid in m ? (({ [pid]: _, ...rest }) => rest)(m) : m));
+
 /* ---- connection browser (layer-1 discovery view) -------------------- */
 /* The host-wide connection list (netconn) that you pick tap targets from. A
  * swap-in overlay like the inspector; opens automatically when nothing is armed

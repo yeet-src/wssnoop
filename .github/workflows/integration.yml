@@ -1,0 +1,40 @@
+name: integration
+
+# Attach the language TLS taps (Go crypto/tls, rustls) to a real wss:// workload
+# and assert plaintext capture — the runtime counterpart to kernel-matrix (which
+# only checks the verifier accepts the programs). See scripts/it.sh.
+#
+# Unlike the unit tests, this needs a Linux kernel + root (BPF), the language
+# toolchains (installed below), AND the yeet runtime on PATH — which a
+# GitHub-hosted runner does not ship. So it is manual (workflow_dispatch) and
+# targets a self-hosted runner that has yeet; if yeet is absent it skips rather
+# than fails red. Point it at your runner by editing `runs-on`.
+on:
+  workflow_dispatch:
+    inputs:
+      which:
+        description: "which taps to run (all|go|rust)"
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    # A self-hosted runner with the yeet runtime + a BPF-capable kernel. Swap in
+    # your label; ubuntu-latest works only if yeet is provisioned onto it.
+    runs-on: [self-hosted, yeet]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check for the yeet runtime
+        id: yeet
+        run: |
+          if command -v yeet >/dev/null; then echo "have=1" >> "$GITHUB_OUTPUT"
+          else echo "::warning::yeet runtime not on PATH — skipping integration run"; echo "have=0" >> "$GITHUB_OUTPUT"; fi
+      - name: Run integration taps
+        if: steps.yeet.outputs.have == '1'
+        run: make test-integration WHICH=${{ inputs.which }}

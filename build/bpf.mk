@@ -30,7 +30,17 @@ VMLINUX  := src/bpf/include/vmlinux.h
 # object with an unattached uprobe. Every other src/bpf/*.bpf.c links into the
 # one SSL tap object.
 SOCKET_SRC := src/bpf/socket.bpf.c
-BPF_SRCS := $(filter-out $(SOCKET_SRC),$(wildcard src/bpf/*.bpf.c))
+# probe_ex.bpf.c is likewise its own object: it hooks SSL_read_ex/SSL_write_ex,
+# which are absent from BoringSSL and pre-1.1.1 OpenSSL, so it must be loadable
+# and attachable independently of the classic SSL_read/SSL_write tap (a missing
+# _ex symbol must not fail the whole tap — start() rejects an unattached uprobe).
+EX_SRC := src/bpf/probe_ex.bpf.c
+# goprobe.bpf.c hooks Go's crypto/tls; its own object for the same reason (its
+# symbols exist only in a Go binary, must attach independently and best-effort).
+GO_SRC := src/bpf/goprobe.bpf.c
+# rustprobe.bpf.c hooks rustls; its own object for the same reason.
+RUST_SRC := src/bpf/rustprobe.bpf.c
+BPF_SRCS := $(filter-out $(SOCKET_SRC) $(EX_SRC) $(GO_SRC) $(RUST_SRC),$(wildcard src/bpf/*.bpf.c))
 # One intermediate object per unit. They live under .build/ so they are
 # never mistaken for the loadable object in bin/.
 BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
@@ -39,6 +49,9 @@ BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
 # probe.bpf.o, probes/netconn.js loads socket.bpf.o.
 BPF_OUT    := bin/probe.bpf.o
 SOCKET_OUT := bin/socket.bpf.o
+EX_OUT     := bin/probe_ex.bpf.o
+GO_OUT     := bin/goprobe.bpf.o
+RUST_OUT   := bin/rustprobe.bpf.o
 
 BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/bpf/include
 # Add the vendored libbpf program headers (<bpf/bpf_helpers.h>, …) when a
@@ -46,7 +59,7 @@ BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/b
 # it, the build falls back to a host libbpf-dev on the default include path.
 BPF_CFLAGS += $(if $(BPF_SYSINCLUDE),-I$(BPF_SYSINCLUDE))
 
-bpf: $(BPF_OUT) $(SOCKET_OUT)
+bpf: $(BPF_OUT) $(SOCKET_OUT) $(EX_OUT) $(GO_OUT) $(RUST_OUT)
 
 # `| toolchain` (order-only) ensures the vendored clang/bpftool are present in
 # the cache before any rule shells out to them, without forcing rebuilds.
@@ -71,11 +84,26 @@ $(SOCKET_OUT): .build/bpf/socket.bpf.o | bin toolchain
 	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
 	$(BPFTOOL) gen object $@ $<
 
+# The _ex tap likewise stands alone (one unit through `gen object`).
+$(EX_OUT): .build/bpf/probe_ex.bpf.o | bin toolchain
+	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
+	$(BPFTOOL) gen object $@ $<
+
+# The Go tap stands alone too.
+$(GO_OUT): .build/bpf/goprobe.bpf.o | bin toolchain
+	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
+	$(BPFTOOL) gen object $@ $<
+
+# The rustls tap stands alone too.
+$(RUST_OUT): .build/bpf/rustprobe.bpf.o | bin toolchain
+	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
+	$(BPFTOOL) gen object $@ $<
+
 bin:
 	mkdir -p bin
 
 clean-bpf:
-	rm -rf $(BPF_OUT) $(SOCKET_OUT) .build $(VMLINUX)
+	rm -rf $(BPF_OUT) $(SOCKET_OUT) $(EX_OUT) $(GO_OUT) $(RUST_OUT) .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a
@@ -84,9 +112,9 @@ clean-bpf:
 # `yeet run` does). VERISTAT is resolved by build/toolchain.mk (the vendored
 # static binary, or `veristat` on PATH).
 .PHONY: veristat
-veristat: $(BPF_OUT) | toolchain
+veristat: bpf | toolchain
 	@command -v $(VERISTAT) >/dev/null 2>&1 || { echo "error: veristat not found ($(VERISTAT)) — bump build/toolchain.lock to a toolchain that ships veristat, or install veristat on PATH"; exit 1; }
-	$(VERISTAT) $(BPF_OUT)
+	$(VERISTAT) $(BPF_OUT) $(EX_OUT) $(GO_OUT) $(RUST_OUT) $(SOCKET_OUT)
 
 # Run the same verifier check across a matrix of kernels locally (Linux + KVM),
 # the local counterpart to .github/workflows/kernel-matrix.yml. Boots

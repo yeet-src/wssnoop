@@ -13,14 +13,26 @@ import { Box, Text, bold, fg } from "yeet:tui";
 import { connections } from "../probes/netconn.js";
 import { procInfo, resolve, sslInfo, classifySsl } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";
-import { runtimeOf } from "../probes/discover.js";
-import { isArmed, toggleArm } from "../controls.js";
+import { isArmed, toggleArm, tapOutcome } from "../controls.js";
 import { COL } from "../palette.js";
 import { hoverBg, hoverTip } from "./hover.js";
 
+const TLS_PORTS = new Set([443, 8443, 9443]); // outbound TLS — the wss:// default and common alts
 const distinctPeers = (arr) => new Set(arr.map((c) => `${c.addr}:${c.port}`)).size;
 const sample = (arr) => (arr.length ? `${arr[0].addr}:${arr[0].port}` : "");
 const labelOf = (id, pid) => id?.label ?? `pid ${pid}`;
+const isTls = (arr) => arr.some((c) => TLS_PORTS.has(c.port));
+
+/* The tag column: the runtime, or the tap state once armed. An armed pid whose
+ * tap came back opaque (ciphertext from a non-OpenSSL stack — Go/rustls) reads
+ * "opaque" in a caution tone, so a decodeless row is explained rather than
+ * looking broken; a TLS process we haven't placed reads "tls?" — a candidate
+ * you can arm to find out (attach-and-see is the ground truth). */
+const rowTag = (cls, armed, outcome, tls) => {
+  if (armed && outcome === "opaque") return { text: "opaque", color: COL.snip };
+  const label = cls?.label ?? (tls ? "tls?" : "?");
+  return { text: label, color: COL.dim };
+};
 
 export default function Browser() {
   return (
@@ -35,6 +47,7 @@ export default function Browser() {
           const conns = connections.get();
           const info = procInfo.get();
           const scls = sslInfo.get();
+          const outc = tapOutcome.get();
           const cmap = containers.get();
 
           /* Group live connections by pid; resolve identity + SSL class for each
@@ -48,22 +61,24 @@ export default function Browser() {
             a.push(c);
           }
 
-          /* Keep processes with reachable TLS — a mapped libssl (any language) or
-           * a static-OpenSSL runtime — plus anything already armed, so you can
-           * always disarm what you started. Class-driven, not a name list, so a
-           * Rust native-tls or dynamically-linked C++ app shows up too. A pid
-           * still being classified is held back until its class arrives. */
+          /* Which processes to offer as tap targets. Show anything we can decode
+           * (a mapped libssl or a known static-OpenSSL runtime), anything doing
+           * TLS we haven't placed (an unknown static exe — a Rust/C++ candidate,
+           * or a Go/rustls one that will honestly degrade to opaque when armed),
+           * and anything already armed (so you can always disarm it). Hide only
+           * the noise: an unplaced process with no TLS connection (plaintext /
+           * non-WebSocket). A pid still being classified is held back. */
           const rows = [];
           let hidden = 0;
           for (const [pid, arr] of byPid) {
             const id = info[pid];
             const cls = scls[pid];
+            const tls = isTls(arr);
             if (!isArmed(pid)) {
               if (cls == null) continue; // still classifying
-              if (cls === "opaque") { hidden += 1; continue; }
+              if (!cls.decodable && !tls) { hidden += 1; continue; } // unplaced, no TLS — noise
             }
-            const tag = runtimeOf(id?.exe, id?.comm) ?? (cls === "libssl" ? "libssl" : "?");
-            rows.push({ pid, arr, tag, id });
+            rows.push({ pid, arr, cls, tls, id });
           }
           /* Stable order by pid — a busy process gaining connections must not
            * reshuffle rows under the pointer (arming would land on the wrong
@@ -74,7 +89,7 @@ export default function Browser() {
             return (
               <Text break="none" italic fg={COL.dim}>
                 {conns.length
-                  ? `  ${byPid.size} process(es) connecting, none with reachable TLS yet…`
+                  ? `  ${byPid.size} process(es) connecting, none doing TLS yet…`
                   : "  watching for outbound connections…"}
               </Text>
             );
@@ -87,6 +102,8 @@ export default function Browser() {
             const cname = cid ? cmap[cid]?.name ?? cid : null;
             const label = labelOf(r.id, r.pid);
             const peers = distinctPeers(r.arr);
+            const outcome = outc[r.pid];
+            const tag = rowTag(r.cls, armed, outcome, r.tls);
             return (
               <Box
                 direction="row"
@@ -97,12 +114,18 @@ export default function Browser() {
                 onClick={(e) => (toggleArm(r.pid), e.stopPropagation())}
                 {...hoverTip(key, () =>
                   isArmed(r.pid)
-                    ? `stop decoding ${label} (pid ${r.pid})`
-                    : `decode ${label} (pid ${r.pid}) · attaches a uprobe scoped to just this process`,
+                    ? outcome === "opaque"
+                      ? `${label} (pid ${r.pid}) is armed but opaque — ciphertext from a non-OpenSSL stack (Go/rustls/stripped); click to stop`
+                      : `stop decoding ${label} (pid ${r.pid})`
+                    : r.cls?.decodable === false
+                      ? `${label} (pid ${r.pid}) · ${r.cls.label} has no OpenSSL boundary to hook — arming will show it as opaque`
+                      : r.cls?.decodable == null && r.tls
+                        ? `try ${label} (pid ${r.pid}) · a TLS process we haven't placed; arming attaches a uprobe and finds out (may be opaque)`
+                        : `decode ${label} (pid ${r.pid}) · attaches a uprobe scoped to just this process`,
                 )}
               >
                 <Text width={2}>{armed ? fg(COL.accent)("●") : fg(COL.dim)("○")}</Text>
-                <Text width={8}>{fg(COL.dim)(r.tag.padEnd(8))}</Text>
+                <Text width={8}>{fg(tag.color)(tag.text.padEnd(8))}</Text>
                 <Box width="1fr" overflow="ellipsis" break="none">
                   <Text>{armed ? bold(fg(COL.ink)(label)) : fg(COL.dim)(label)}</Text>
                 </Box>
@@ -117,7 +140,7 @@ export default function Browser() {
 
           if (hidden > 0) {
             list.push(
-              <Text height={1} italic fg={COL.dim}>{`  + ${hidden} other connecting process(es) (no reachable TLS — Go/rustls/stripped or non-TLS)`}</Text>,
+              <Text height={1} italic fg={COL.dim}>{`  + ${hidden} other connecting process(es) (no TLS connection — plaintext or non-WebSocket)`}</Text>,
             );
           }
           return list;

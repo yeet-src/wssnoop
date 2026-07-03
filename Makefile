@@ -68,7 +68,15 @@ YEET ?= yeet
 test:
 	$(YEET) run test/lib.test.js
 
+# Integration tests: attach the language TLS taps (Go, rustls) to a real
+# workload and assert plaintext capture. Needs a Linux kernel, root (BPF), the
+# yeet runtime, and the go/cargo toolchains — so it runs in the yeet VM / a
+# privileged kernel, not the pure-unit path. `make test-integration [WHICH=go]`.
+WHICH ?= all
+test-integration:
+	YEET="$(YEET)" scripts/it.sh $(WHICH)
+
 clean: clean-bpf
 	rm -rf node_modules dist src/index.jsx
 
-.PHONY: all bundle clean postgen test
+.PHONY: all bundle clean postgen test test-integration

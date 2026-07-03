@@ -40,12 +40,18 @@ struct ssl_event {
  * name "ssl_event" (the `btf_struct` passed to .bind in JS). */
 __attribute__((used)) static const struct ssl_event __ssl_event_anchor;
 
-/* Carry an (id, buf) pair from a read entry probe to its return probe, keyed by
+/* Carry a read call's args from its entry probe to its return probe, keyed by
  * the calling thread — read buffers are only filled by the time the call
- * returns. A hash (not a single slot) tolerates nested/recursive use. */
+ * returns. A hash (not a single slot) tolerates nested/recursive use.
+ *
+ * `nread` is SSL_read_ex's `size_t *readbytes` out-param: that variant reports
+ * the count through this pointer and returns only a 0/1 status, so the return
+ * probe reads `*nread` for the length. Plain SSL_read leaves it 0 and uses the
+ * return value instead. */
 struct read_args {
     __u64 ssl;
     __u64 buf;
+    __u64 nread;
 };
 
 /* Fill a reserved event and copy up to CAP_MASK bytes of plaintext from user

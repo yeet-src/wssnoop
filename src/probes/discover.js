@@ -18,57 +18,23 @@
  */
 
 import { containerOf } from "../lib/container.js";
-
-const base = (p) => (p || "").split("/").pop() || "";
-
-/* Does a process running `exe` (comm `comm`) count as runtime `name`? A bare
- * exe basename match, OR a *versioned* one — a real interpreter's exe resolves
- * to `python3.13` / `ruby3.3`, not `python3` — so `name` followed by only
- * digits/dots also matches. comm is a fallback (it can be renamed, e.g. a
- * worker that set its process title). */
-const nameMatches = (exe, comm, name) => {
-  const b = base(exe);
-  return b === name || (b.startsWith(name) && /^[0-9.]+$/.test(b.slice(name.length))) || comm === name;
-};
+import { KNOWN_BINS, classify, libsslPath, nameMatches } from "./runtimes.js";
 
 export const DEFAULT_BIN = "libssl.so";
-
-/* Runtimes whose TLS is worth tracing out of the box, so `--bin` is only needed
- * for anything off this list ("--bin just for extras"). node/deno/bun bake
- * OpenSSL into the executable (static — we probe the exe itself); the scripting
- * runtimes usually map a libssl (dynamic — the SSL path prefers it). Ordered by
- * how likely a wss:// workload is to be one of them. */
-export const KNOWN_BINS = ["node", "deno", "bun", "python3", "python", "ruby"];
 
 /* An explicit target needs no discovery: a path, a `.so`, or a libssl name. */
 export const isExplicit = (b) => b.includes("/") || b.endsWith(".so") || b.includes(".so.") || /libssl/i.test(b);
 
-/* Which known runtime a process is (by exe/comm), or null. Only a *hint* now:
- * the general tappability signal is sslClass below (a mapped libssl, any
- * language). This still names a runtime so the browser can label a row. */
-export const runtimeOf = (exe, comm) => KNOWN_BINS.find((n) => nameMatches(exe, comm, n)) ?? null;
-
-const LIBSSL = /libssl/i;
-/* The libssl a process maps (dynamic OpenSSL), or null. One primitive, shared by
- * resolveBin (which wants the path to attach) and sslClass (which wants the
- * fact). `paths` is the process's mapped file paths. */
-const libsslPath = (paths) => (paths || []).find((p) => p && LIBSSL.test(p)) ?? null;
-
-/* How confidently the SSL uprobe will bind to a process, from graph-visible
- * facts alone (the graph exposes maps and exe, not ELF symbols). Name-agnostic
- * first, so no runtime is privileged:
- *   "libssl"  — maps a libssl (dynamic OpenSSL): the symbols are definitely
- *               present, whatever the language (Rust native-tls, a dynamically
- *               linked C++ app, the scripting runtimes).
- *   "runtime" — a known runtime that bakes OpenSSL into the executable
- *               (node/deno/bun): no libssl mapping, but the symbols are
- *               statically there. The one place a name is unavoidable.
- *   "opaque"  — neither: Go's crypto/tls, rustls, or a stripped static build.
- *               Arming still attempts; the tap self-reports opaque if no
- *               plaintext comes back.
- * `maps` is the process's mapped file paths. */
-export const sslClass = ({ exe, comm, maps }) =>
-  libsslPath(maps) ? "libssl" : runtimeOf(exe, comm) ? "runtime" : "opaque";
+/* The coarse tappability class the pre-registry code exposed, kept for callers
+ * that only need the three-way split (procinfo caches the richer classify()):
+ *   "libssl"  — maps a libssl (dynamic OpenSSL), any language.
+ *   "runtime" — a known static-OpenSSL runtime (node/deno/bun).
+ *   "opaque"  — neither decodable-by-known-means: Go/rustls/stripped/unknown.
+ * See runtimes.classify for the full { label, tap, decodable }. */
+export const sslClass = (proc) => {
+  const c = classify(proc);
+  return c.tap === "libssl" ? "libssl" : c.decodable ? "runtime" : "opaque";
+};
 
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
 const race = (p, ms) => Promise.race([p, timeout(ms)]);

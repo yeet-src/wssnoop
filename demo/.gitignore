@@ -1,1 +1,6 @@
 node_modules/
+
+# compiled demo workers + toolchain build dirs (rebuilt by scripts/it.sh)
+goworker/go-worker
+goworker/extract_goid/extract_goid
+rustworker/target/

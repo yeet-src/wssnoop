@@ -37,7 +37,7 @@ import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
 import { createDecoder, DIR_WRITE, TRANSPORT_TCP } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
 import { subscribeFrames, armPlaintext, disarmPlaintext } from "./probes/netconn.js";
-import { focusKey, clearFocus, selectedConn, armedPids } from "./controls.js";
+import { focusKey, clearFocus, selectedConn, armedPids, setTapOutcome, clearTapOutcome } from "./controls.js";
 
 /* Idle eviction: a conn silent this long is dropped to free its scrollback. We
  * keep it short — closed/recycled conns shouldn't hoard memory — and instead
@@ -540,12 +540,14 @@ export function createSession({ binWide = null, debug = false } = {}) {
       if (entry.stopped || entry.plaintext) return;
       entry.plaintext = true;
       armPlaintext(pid);
+      setTapOutcome(pid, "plaintext");
       entry.guard = setTimeout(() => {
         if (entry.stopped) return;
         if (!reg.hasPid(pid)) {
           disarmPlaintext(pid);
           entry.plaintext = false;
           entry.opaque = true; /* encrypted on the wire, non-OpenSSL — can't decode */
+          setTapOutcome(pid, "opaque");
           refreshStatus();
         }
       }, GRACE_MS);
@@ -565,6 +567,7 @@ export function createSession({ binWide = null, debug = false } = {}) {
           entry.stop = () => s.stop();
           entry.setFocus = s.setFocus;
           applyFocus(entry, pid);
+          setTapOutcome(pid, "tls"); // SSL uprobe bound — decoding wss://
           refreshStatus();
         })
         /* Not a fault — an unattachable uprobe is the expected non-OpenSSL case;
@@ -580,6 +583,7 @@ export function createSession({ binWide = null, debug = false } = {}) {
       if (entry.guard) clearTimeout(entry.guard);
       if (entry.plaintext) disarmPlaintext(pid);
       entry.stop();
+      clearTapOutcome(pid);
       reg.dropPid(pid); /* its rows leave the table now, not a window later */
       refreshStatus();
     };

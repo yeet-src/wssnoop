@@ -1,0 +1,17 @@
+[package]
+name = "rust-worker"
+version = "0.1.0"
+edition = "2021"
+
+# rustls only (no native-tls), so the binary carries no OpenSSL — this is the
+# pure-Rust TLS case the SSL uprobe can't see. tokio-tungstenite 0.26 per the
+# demo stack.
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net"] }
+tokio-tungstenite = { version = "0.26", features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+# rustls 0.23 (via tokio-rustls 0.26) needs a crypto provider chosen explicitly.
+rustls = { version = "0.23", features = ["ring"] }
+
+[profile.release]
+strip = false

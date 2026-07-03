@@ -24,63 +24,121 @@ const BIN_DIR = inBundle ? "../bin" : "../../bin";
  *
  *   const session = await snoop({ bin, pid, onEvent, onError });
  */
-export async function snoop({ bin, pid, onEvent, onError, onBin }) {
-  const probe = new BpfObject({
-    exe: `${BIN_DIR}/probe.bpf.o`,
-    base: import.meta.dirname,
-  });
+/* The plaintext boundaries we know how to hook, one loadable object each. A
+ * target offers some subset — an OpenSSL app has CLASSIC (+EX on OpenSSL 3), a
+ * Go app has GO, a BoringSSL app has only CLASSIC — so every object is attached
+ * BEST-EFFORT and independently: start() rejects an object with any unattached
+ * uprobe, so one object's missing symbols must not take down another's. snoop()
+ * keeps whichever bind; if none do (rustls, a stripped static exe), the caller
+ * falls back to the plaintext socket tap. */
 
+/* Classic byte-count OpenSSL (SSL_read/SSL_write) — node, Rust native-tls, uSockets. */
+const CLASSIC = {
+  file: "probe.bpf.o",
+  probes: [
+    ["probe_ssl_write", "SSL_write"],
+    ["probe_ssl_read_enter", "SSL_read"],
+    ["probe_ssl_read_exit", "SSL_read"],
+  ],
+};
+
+/* OpenSSL 1.1.1+ `_ex` API — what CPython (and so Python `websockets`) calls;
+ * absent from BoringSSL / pre-1.1.1 OpenSSL. */
+const EX = {
+  file: "probe_ex.bpf.o",
+  probes: [
+    ["probe_ssl_write_ex", "SSL_write_ex"],
+    ["probe_ssl_read_ex_enter", "SSL_read_ex"],
+    ["probe_ssl_read_ex_exit", "SSL_read_ex"],
+  ],
+};
+
+/* Go's crypto/tls (no OpenSSL symbols at all). The symbol names carry the Go
+ * package path; libbpf resolves them from .symtab, so a stripped Go binary
+ * won't attach. Both directions of crypto/tls.(*Conn).Write/Read; the read pair
+ * is goid-keyed (goroutines migrate threads mid-call) — see goprobe.bpf.c. */
+const GO = {
+  file: "goprobe.bpf.o",
+  probes: [
+    ["probe_go_tls_write", "crypto/tls.(*Conn).Write"],
+    ["probe_go_tls_read_enter", "crypto/tls.(*Conn).Read"],
+    ["probe_go_tls_read_exit", "crypto/tls.(*Conn).Read"],
+  ],
+};
+
+export async function snoop({ bin, pid, onEvent, onError, onBin }) {
   /* Discover where the SSL symbols live (path / library / process exe) before
    * attaching; report the resolved target so the UI can show what it hooked. */
   const target = await resolveBin({ bin, pid });
   onBin?.(target);
 
-  // Each attaches as `kind: "uprobe"`; the daemon reads each program's ELF
-  // section to tell entry (SEC("uprobe")) from return (SEC("uretprobe")).
+  // Attaches as `kind: "uprobe"`; the daemon reads each program's ELF section
+  // to tell entry (SEC("uprobe")) from return (SEC("uretprobe")).
   const uprobe = { kind: "uprobe", binary: target, pid };
 
-  const control = await probe
-    .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
-    .bind("focus", { kind: "array" }) // writable filter (slot 0 ssl, 1 pid)
-    .attach("probe_ssl_write", { ...uprobe, symbol: "SSL_write" })
-    .attach("probe_ssl_read_enter", { ...uprobe, symbol: "SSL_read" })
-    .attach("probe_ssl_read_exit", { ...uprobe, symbol: "SSL_read" })
-    .start();
+  /* Load one tap object, attach its uprobes, and wire its ringbuf → onEvent and
+   * its live focus filter. Throws if a symbol can't be attached (the caller
+   * decides whether that's fatal or best-effort). */
+  const attachTap = async ({ file, probes }) => {
+    let obj = new BpfObject({ exe: `${BIN_DIR}/${file}`, base: import.meta.dirname })
+      .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
+      .bind("focus", { kind: "array" }); // writable filter (slot 0 ssl, 1 pid)
+    for (const [prog, symbol] of probes) obj = obj.attach(prog, { ...uprobe, symbol });
+    const control = await obj.start();
 
-  /* The user→kernel control path: write the BPF capture filter live so the
-   * probe only emits the focused connection's (or process's) events. */
-  const focus = new ArrayMap(control, "focus");
-  const setFocus = async ({ ssl = 0n, pid = 0 } = {}) => {
-    try {
-      await focus.update(0, BigInt(ssl || 0));
-      await focus.update(1, BigInt(pid || 0));
-    } catch (err) {
-      if (onError) onError(err);
-    }
-  };
-
-  const events = new RingBuf(control, "events");
-  const sub = await events.subscribe(
-    (wrapper) => {
-      /* A throw here would escape into the runtime and tear down the
-       * isolate, so keep faults local to the offending event. */
+    const focus = new ArrayMap(control, "focus");
+    const setFocus = async ({ ssl = 0n, pid = 0 } = {}) => {
       try {
-        const e = (wrapper && wrapper.ssl_event) || wrapper;
-        if (e) onEvent(e);
+        await focus.update(0, BigInt(ssl || 0));
+        await focus.update(1, BigInt(pid || 0));
       } catch (err) {
         if (onError) onError(err);
       }
-    },
-    (err) => {
-      if (onError) onError(err);
-    },
-  );
+    };
+
+    const sub = await new RingBuf(control, "events").subscribe(
+      (wrapper) => {
+        /* A throw here would escape into the runtime and tear down the
+         * isolate, so keep faults local to the offending event. */
+        try {
+          const e = (wrapper && wrapper.ssl_event) || wrapper;
+          if (e) onEvent(e);
+        } catch (err) {
+          if (onError) onError(err);
+        }
+      },
+      (err) => {
+        if (onError) onError(err);
+      },
+    );
+
+    return {
+      setFocus,
+      async stop() {
+        await sub.unsubscribe();
+        await control.stop();
+      },
+    };
+  };
+
+  /* Attach every boundary we can; a target offers some subset. If none bind,
+   * throw so the caller falls back to the plaintext socket tap. */
+  const taps = [];
+  for (const spec of [CLASSIC, EX, GO]) {
+    try {
+      taps.push(await attachTap(spec));
+    } catch {
+      /* this boundary's symbols aren't in the target — try the next */
+    }
+  }
+  if (taps.length === 0) throw new Error("no tappable TLS boundary");
 
   return {
-    setFocus,
+    setFocus: async (f) => {
+      for (const t of taps) await t.setFocus(f);
+    },
     async stop() {
-      await sub.unsubscribe();
-      await control.stop();
+      for (const t of taps) await t.stop();
     },
   };
 }
