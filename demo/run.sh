@@ -40,6 +40,10 @@ COMMANDS
   attach           start the workers AND launch wssnoop attached to them
   docker           run workers INSIDE a docker container and attach wssnoop to
                    it — demonstrates the container nesting tier (needs docker)
+  go               build + run a gorilla/websocket worker (Go crypto/tls) and
+                   attach wssnoop — decodes pure-Go TLS (needs go)
+  rust             build + run a tokio-tungstenite (rustls) worker and attach
+                   wssnoop, auto-resolving rustls' symbols (needs cargo)
   stop             stop the demo workers (and the demo container) — leaves any
                    running wssnoop alone
   reap             kill leftover wssnoop isolates from a crashed terminal
@@ -71,7 +75,7 @@ ABRUPT="${ABRUPT:-}"
 set_cmd() { [[ -z "$CMD" ]] || { echo "conflicting commands: $CMD and $1" >&2; exit 2; }; CMD="$1"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    start|attach|docker|stop|status|reap) set_cmd "$1" ;;
+    start|attach|docker|stop|status|reap|go|rust) set_cmd "$1" ;;
     help|--help|-h) CMD="help"; break ;;
     --recycle)    RECYCLE="$2"; shift ;;
     --recycle=*)  RECYCLE="${1#*=}" ;;
@@ -188,11 +192,50 @@ status() {
   fi
 }
 
+# Go demo: build + run a gorilla/websocket worker (pure-Go crypto/tls, no
+# OpenSSL) and attach wssnoop to it. Go symbols are stable, so nothing to
+# resolve — wssnoop's Go tap attaches by name automatically.
+go_demo() {
+  command -v go >/dev/null || { echo "go not found — install golang-go"; exit 1; }
+  echo ">> building go worker…"
+  (cd "$DEMO_DIR/goworker" && GOFLAGS=-mod=mod go build -o /tmp/go-worker .) || { echo "go build failed"; exit 1; }
+  pkill -x go-fanout 2>/dev/null || true; sleep 1
+  setsid /tmp/go-worker --role go-fanout --feeds coinbase,kraken --recycle 8000 >/tmp/wssnoop-go.log 2>&1 </dev/null &
+  sleep 2
+  local pid; pid="$(pgrep -x go-fanout | head -1)"
+  echo ">> go-fanout up (pid $pid); launching wssnoop (Go crypto/tls tap)…"
+  cd "$REPO_DIR"; exec "$YEET" run src/main.jsx -- --pid "$pid"
+}
+
+# rustls demo: build + run a tokio-tungstenite (rustls) worker and attach
+# wssnoop to it. rustls' boundary symbols carry a per-build codegen hash the
+# isolate can't resolve, so we resolve them here (nm) and hand them in — the
+# demo "just works" with no manual step. (Fully dynamic discovery would need a
+# daemon-side symbol-by-prefix resolver — see ../COORDINATION.md / YEET-DX-NOTES.)
+rust_demo() {
+  command -v cargo >/dev/null || { echo "cargo not found — install cargo/rustc"; exit 1; }
+  echo ">> building rust worker (rustls)…"
+  (cd "$DEMO_DIR/rustworker" && cargo build --release) || { echo "cargo build failed"; exit 1; }
+  pkill -x rust-worker 2>/dev/null || true; sleep 1 # free /tmp/rust-worker before copy
+  cp "$DEMO_DIR/rustworker/target/release/rust-worker" /tmp/rust-worker
+  setsid /tmp/rust-worker --role rust-md --feeds coinbase,kraken --recycle 8000 >/tmp/wssnoop-rust.log 2>&1 </dev/null &
+  sleep 2
+  local pid wsym rsym
+  pid="$(pgrep -x rust-worker | head -1)"
+  wsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep -E 'PlaintextSink.*5write17h' | grep -v vectored | head -1)"
+  rsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep take_received_plaintext | head -1)"
+  [ -n "$wsym" ] && [ -n "$rsym" ] || { echo "could not resolve rustls symbols (need nm + an unstripped build)"; exit 1; }
+  echo ">> rust-md up (pid $pid); resolved rustls symbols; launching wssnoop…"
+  cd "$REPO_DIR"; exec "$YEET" run src/main.jsx -- --pid "$pid" --rust-write "$wsym" --rust-read "$rsym"
+}
+
 case "$CMD" in
   ""|help) usage; exit 0 ;;
   status)  status; exit 0 ;;
   stop)    stop; echo "stopped demo workers"; exit 0 ;;
   reap)    reap_jails; echo "reaped leftover wssnoop isolates"; exit 0 ;;
+  go)      go_demo ;;
+  rust)    rust_demo ;;
 esac
 
 # --- docker (containerized workers; no host node needed) ---------------------
