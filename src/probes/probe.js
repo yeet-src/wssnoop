@@ -67,28 +67,23 @@ const GO = {
 };
 
 /* rustls (tokio-tungstenite, any pure-Rust TLS). Its boundary symbols are
- * mangled with a per-build codegen hash the isolate can't resolve (no fs), so
- * they're supplied explicitly — resolve with nm and pass them:
- *
- *   nm <bin> | grep -E 'PlaintextSink.*5write17h|take_received_plaintext'
- *   yeet run … -- --rust-write <write-sym> --rust-read <read-sym>
- *
- * Absent → rustls simply isn't tapped and its pids degrade to opaque, as
- * before. The symbols are per-binary, so this covers a single rustls target
- * (the common --pid/--bin case); a multi-binary session would need per-binary
- * symbols. libbpf resolves the mangled string daemon-side. */
-const rustSpec = () => {
-  const a = (typeof yeet !== "undefined" && yeet.args) || {};
-  const write = a["rust-write"];
-  const read = a["rust-read"];
-  if (!write || !read) return null;
-  return {
-    file: "rustprobe.bpf.o",
-    probes: [
-      ["probe_rust_tls_write", write],
-      ["probe_rust_tls_read", read],
-    ],
-  };
+ * mangled with a per-build codegen hash the isolate can't know, so we attach by
+ * `symbol_prefix`: the daemon resolves the single .symtab/.dynsym symbol
+ * starting with the stable prefix (the part before the `17h<hash>E` suffix) and
+ * errors if none/several match. So this needs no per-binary config — a
+ * non-rustls target simply has no such symbol and the attach is skipped. The
+ * prefixes are legacy-mangling specific (rustc's `_ZN…`); a v0-mangled build
+ * would need the `_R…` forms. Egress `…PlaintextSink$GT$5write17h` stops at
+ * `5write` so it can't also match `14write_vectored`. */
+const RUST_WRITE_PREFIX =
+  "_ZN99_$LT$rustls..conn..ConnectionCommon$LT$T$GT$$u20$as$u20$rustls..conn..connection..PlaintextSink$GT$5write17h";
+const RUST_READ_PREFIX = "_ZN6rustls12common_state11CommonState23take_received_plaintext17h";
+const RUST = {
+  file: "rustprobe.bpf.o",
+  probes: [
+    ["probe_rust_tls_write", { symbol_prefix: RUST_WRITE_PREFIX }],
+    ["probe_rust_tls_read", { symbol_prefix: RUST_READ_PREFIX }],
+  ],
 };
 
 export async function snoop({ bin, pid, onEvent, onError, onBin }) {
@@ -108,7 +103,12 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
     let obj = new BpfObject({ exe: `${BIN_DIR}/${file}`, base: import.meta.dirname })
       .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
       .bind("focus", { kind: "array" }); // writable filter (slot 0 ssl, 1 pid)
-    for (const [prog, symbol] of probes) obj = obj.attach(prog, { ...uprobe, symbol });
+    // A probe's target is either an exact symbol (string) or attach options
+    // (e.g. { symbol_prefix }) merged into the uprobe spec.
+    for (const [prog, target] of probes) {
+      const opts = typeof target === "string" ? { symbol: target } : target;
+      obj = obj.attach(prog, { ...uprobe, ...opts });
+    }
     const control = await obj.start();
 
     const focus = new ArrayMap(control, "focus");
@@ -148,11 +148,8 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
 
   /* Attach every boundary we can; a target offers some subset. If none bind,
    * throw so the caller falls back to the plaintext socket tap. */
-  const specs = [CLASSIC, EX, GO];
-  const rust = rustSpec();
-  if (rust) specs.push(rust);
   const taps = [];
-  for (const spec of specs) {
+  for (const spec of [CLASSIC, EX, GO, RUST]) {
     try {
       taps.push(await attachTap(spec));
     } catch {

@@ -208,25 +208,21 @@ go_demo() {
 }
 
 # rustls demo: build + run a tokio-tungstenite (rustls) worker and attach
-# wssnoop to it. rustls' boundary symbols carry a per-build codegen hash the
-# isolate can't resolve, so we resolve them here (nm) and hand them in — the
-# demo "just works" with no manual step. (Fully dynamic discovery would need a
-# daemon-side symbol-by-prefix resolver — see ../COORDINATION.md / YEET-DX-NOTES.)
+# wssnoop to it. wssnoop attaches to rustls by symbol_prefix (the daemon
+# resolves the per-build codegen hash), so there's nothing to pass — the demo
+# "just works" like any other runtime.
 rust_demo() {
-  command -v cargo >/dev/null || { echo "cargo not found — install cargo/rustc"; exit 1; }
+  [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" # prefer the rustup toolchain
+  command -v cargo >/dev/null || { echo "cargo not found — install rustup/cargo"; exit 1; }
   echo ">> building rust worker (rustls)…"
   (cd "$DEMO_DIR/rustworker" && cargo build --release) || { echo "cargo build failed"; exit 1; }
   pkill -x rust-worker 2>/dev/null || true; sleep 1 # free /tmp/rust-worker before copy
   cp "$DEMO_DIR/rustworker/target/release/rust-worker" /tmp/rust-worker
   setsid /tmp/rust-worker --role rust-md --feeds coinbase,kraken --recycle 8000 >/tmp/wssnoop-rust.log 2>&1 </dev/null &
   sleep 2
-  local pid wsym rsym
-  pid="$(pgrep -x rust-worker | head -1)"
-  wsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep -E 'PlaintextSink.*5write17h' | grep -v vectored | head -1)"
-  rsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep take_received_plaintext | head -1)"
-  [ -n "$wsym" ] && [ -n "$rsym" ] || { echo "could not resolve rustls symbols (need nm + an unstripped build)"; exit 1; }
-  echo ">> rust-md up (pid $pid); resolved rustls symbols; launching wssnoop…"
-  cd "$REPO_DIR"; exec "$YEET" run src/main.jsx -- --pid "$pid" --rust-write "$wsym" --rust-read "$rsym"
+  local pid; pid="$(pgrep -x rust-worker | head -1)"
+  echo ">> rust-md up (pid $pid); launching wssnoop (rustls tap)…"
+  cd "$REPO_DIR"; exec "$YEET" run src/main.jsx -- --pid "$pid"
 }
 
 case "$CMD" in

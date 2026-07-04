@@ -271,17 +271,21 @@ arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
   24-byte value laid out `{cap @ +0 (a 0x8000… marker), ptr @ +8, len @ +16}`
   (found by dumping — not the naive Vec order; verify per build). `&mut self` is
   the *same* pointer both hooks see, so egress and ingress fold into one conn.
-- The blocker is naming, not inlining: symbols are mangled *with a codegen hash*
-  (`..PlaintextSink$GT$5write17h`**`c274a2dce4faded2`**`E`) that **changes every
-  build**, so you can't hardcode the name. libbpf resolves it daemon-side from
-  the string, so you only need to hand it the current mangled name — which means
-  resolving it per-target (nm/`.symtab`). Rust threads don't migrate mid-call,
-  so pid_tgid keying is fine and uprobe/uretprobe are safe.
+- The blocker *was* naming, not inlining: symbols are mangled *with a codegen
+  hash* (`..PlaintextSink$GT$5write17h`**`c274a2dce4faded2`**`E`) that **changes
+  every build**, so you can't hardcode the name. Resolved by the daemon's
+  `symbol_prefix` uprobe field (see below): wssnoop attaches by the stable
+  `..PlaintextSink$GT$5write17h` prefix and the daemon resolves the current
+  hash — no per-target nm, no config. Rust threads don't migrate mid-call, so
+  pid_tgid keying is fine and uprobe/uretprobe are safe.
 
 ### What a general yeet helper would want
-- **Symbol resolution that tolerates Rust hashes** — match by demangled name or
-  a `..write17h`-style prefix, so a caller needn't know the per-build hash. This
-  is the single thing that would turn rustls from "targeted" into "general".
+- **Symbol resolution that tolerates Rust hashes** — ✅ **landed** as the uprobe
+  `symbol_prefix` field: the daemon resolves the single `.symtab`/`.dynsym`
+  symbol starting with a given prefix (errors if none/several). This is what
+  turned rustls from "targeted" into general — wssnoop passes the stable
+  `..write17h` prefix and needs no per-build hash. (Also covers C++ local-lambda
+  mangling.)
 - **Attach-at-all-RETs of a symbol** — scan the symbol's bytes for the arch
   `ret` opcode and attach at each offset; the safe way to capture a Go return
   without uretprobe. (`symbol + offset` already exists; this would automate the

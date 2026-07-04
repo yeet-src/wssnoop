@@ -51,22 +51,18 @@ test_go() {
 
 test_rust() {
   log "rustls"
+  [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" # prefer the rustup toolchain (rust-toolchain.toml)
   command -v cargo >/dev/null || { echo "cargo not installed — skipping"; return; }
   ( cd demo/rustworker && cargo build --release ) >/tmp/it-rust-build.log 2>&1 || { echo "cargo build failed (see /tmp/it-rust-build.log)"; rc=1; return; }
   pkill -x rust-worker 2>/dev/null; sleep 1 # free /tmp/rust-worker (text-busy) before copy
   cp demo/rustworker/target/release/rust-worker /tmp/rust-worker
   ( cd /tmp && setsid /tmp/rust-worker --role rust-md --feeds coinbase --recycle 10000 >/tmp/it-rust.log 2>&1 </dev/null & )
   sleep 5
-  local pid sym
+  local pid
   pid="$(pgrep -x rust-worker | head -1)"
   [ -n "$pid" ] || { echo "rust-worker didn't start"; rc=1; return; }
-  # rustls symbols carry a per-build codegen hash — resolve both now.
-  # egress: ..PlaintextSink$GT$5write17h<hash>E (5write ≠ write_vectored).
-  local wsym rsym
-  wsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep -E 'PlaintextSink.*5write17h' | grep -v vectored | head -1)"
-  rsym="$(nm --defined-only /tmp/rust-worker 2>/dev/null | awk '{print $3}' | grep take_received_plaintext | head -1)"
-  [ -n "$wsym" ] && [ -n "$rsym" ] || { echo "could not resolve rustls symbols"; rc=1; pkill -x rust-worker; return; }
-  run_probe "rustls" test/it-rustls.js --pid "$pid" --bin /tmp/rust-worker --wsym "$wsym" --rsym "$rsym"
+  # No nm step — the test attaches by symbol_prefix, resolved daemon-side.
+  run_probe "rustls" test/it-rustls.js --pid "$pid" --bin /tmp/rust-worker
   pkill -x rust-worker 2>/dev/null
 }
 
