@@ -279,6 +279,24 @@ arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
   hash — no per-target nm, no config. Rust threads don't migrate mid-call, so
   pid_tgid keying is fine and uprobe/uretprobe are safe.
 
+### Stripping: what survives (measured, aarch64)
+
+A name/prefix uprobe needs the symbol in `.symtab`/`.dynsym` (what libbpf
+reads). Strip level decides whether it's there:
+
+- `.dynsym` (exported/dynamic) — **strip never removes it**. So a mapped
+  `libssl`'s `SSL_*` are always resolvable, whatever the app's strip level.
+- `.symtab` (local functions: Go, rustls, static-OpenSSL) — a **full** strip
+  removes it (`strip`, cargo `strip = true`, `go -ldflags="-s -w"`); the attach
+  then fails. Not stripped → mangled but present.
+- **`strip = "debuginfo"` / `strip --strip-debug` keeps `.symtab`** (drops only
+  DWARF) — verified: rustls 7.7M→3.1M, symbols intact and hookable. Full strip
+  → 2.2M, symbols gone.
+- Go's **`.gopclntab` survives even `-s -w`** (the runtime needs it) — every
+  function's name+PC is still in the binary, just not where libbpf looks. So a
+  gopclntab reader recovers stripped-Go symbols; nothing equivalent exists for
+  rustls/C++ (they need external debuginfo).
+
 ### What a general yeet helper would want
 - **Symbol resolution that tolerates Rust hashes** — ✅ **landed** as the uprobe
   `symbol_prefix` field: the daemon resolves the single `.symtab`/`.dynsym`
@@ -286,6 +304,12 @@ arm64; x86-64 differs (args RDI/RSI/RDX, return RAX).
   turned rustls from "targeted" into general — wssnoop passes the stable
   `..write17h` prefix and needs no per-build hash. (Also covers C++ local-lambda
   mangling.)
+- **gopclntab-aware symbol resolution** — resolve a uprobe target from Go's
+  `.gopclntab` function table, not just `.symtab`/`.dynsym`. It's the *only*
+  thing that survives a stripped Go binary (`-s -w`), which production Go builds
+  routinely use, so without it wssnoop decodes stripped Go = nothing. Same shape
+  as `symbol_prefix` (daemon reads the section, hands libbpf an offset); would
+  also help any Go profiler.
 - **Attach-at-all-RETs of a symbol** — scan the symbol's bytes for the arch
   `ret` opcode and attach at each offset; the safe way to capture a Go return
   without uretprobe. (`symbol + offset` already exists; this would automate the

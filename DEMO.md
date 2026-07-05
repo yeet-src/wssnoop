@@ -8,12 +8,24 @@ all from the encrypted side, with eBPF.**
 
 ```sh
 cd ~/src/yeet/wssnoop
-make bpf                 # build the probe object (if not already built)
-./demo/run.sh attach   # 3 worker processes, live traffic, wssnoop attached
+make bpf                 # build the probe objects (if not already built)
+./demo/run.sh attach   # worker processes across 4 runtimes, live traffic, attached
 ```
 
-That's it — the screen fills with three processes (`order-router`, `md-gateway`,
-`risk-engine`), each holding live Coinbase / Kraken / Polymarket connections.
+That's it — the screen fills with worker processes across the whole stack, each
+holding live Coinbase / Kraken / Polymarket connections, **all decoded at once**:
+
+- `order-router`, `md-gateway` — **Node** (bundled OpenSSL, static in the exe)
+- `risk-engine` — **Python** (`libssl.so`, dynamic OpenSSL)
+- `go-fanout` — **Go** gorilla/websocket (pure-Go `crypto/tls`, no OpenSSL)
+- `rust-worker` — **Rust** tokio-tungstenite (**rustls**, pure-Rust TLS)
+
+Every one is a different TLS stack at a different boundary, yet wssnoop decodes
+them uniformly — OpenSSL by symbol, Go by its `crypto/tls` symbols, rustls by
+`symbol_prefix`. (Go and Rust are built on demand; if their toolchains aren't on
+the box those two are skipped and Node + Python still run.) The point to make:
+**"it doesn't matter what your services are written in — if it's TLS, we decode
+it."**
 
 ## The run
 

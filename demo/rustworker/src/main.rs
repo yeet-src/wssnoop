@@ -84,14 +84,22 @@ async fn main() {
     let mut role = "rust-worker".to_string();
     let mut feeds = "coinbase,kraken".to_string();
     let mut recycle: u64 = 0;
+    let mut delay: u64 = 0;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "--role" => { role = args[i + 1].clone(); i += 2; }
             "--feeds" => { feeds = args[i + 1].clone(); i += 2; }
             "--recycle" => { recycle = args[i + 1].parse().unwrap_or(0); i += 2; }
+            "--delay" => { delay = args[i + 1].parse().unwrap_or(0); i += 2; }
             _ => { i += 1; }
         }
+    }
+
+    // Let wssnoop attach before we dial out, so it catches the TLS handshake.
+    if delay > 0 {
+        println!("[{role}] waiting {delay}ms before connecting…");
+        tokio::time::sleep(Duration::from_millis(delay)).await;
     }
 
     let mut handles = vec![];

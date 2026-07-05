@@ -16,7 +16,7 @@
  *
  * Run:
  *   yeet run src/main.jsx                    # no args: browse & pick a process
- *   yeet run src/main.jsx -- --pid <pid>     # arm one process straight away
+ *   yeet run src/main.jsx -- --pid <pid>     # arm process(es); --pid a,b,c too
  *   yeet run src/main.jsx -- --bin <binary>  # bin-wide (every process using it)
  *
  * With no args nothing is tapped: the connection browser (layer-1 discovery,
@@ -62,7 +62,15 @@ const args = (typeof yeet !== "undefined" && yeet.args) || {};
 
 const binArg = args.bin ?? args.b;
 const BIN = binArg != null ? String(binArg) : undefined; /* undefined ⇒ auto-discover */
-const PID = args.pid != null ? Number(args.pid) : undefined;
+/* --pid takes one pid or several (comma-separated, or a repeated flag); each is
+ * armed up front with its own pid-scoped tap. */
+const PIDS =
+  args.pid != null
+    ? String(args.pid)
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0)
+    : [];
 /* test-only: exit after N seconds (clean teardown). Named verbosely so it's
  * never mistaken for a normal run option — the UI otherwise runs until quit. */
 const SECS = Number(args["testonly-exit-after-secs"] ?? 0); /* 0 = run until quit */
@@ -134,9 +142,9 @@ tty.on("keydown", (e) => {
  *   neither   → nothing tapped; open the browser to pick a process from the
  *               live host-wide connection list (layer-1, near-zero cost).
  * The browser is always reopenable with `c`. */
-if (PID != null) arm(PID);
-const BIN_WIDE = PID == null && BIN != null ? BIN : null;
-if (PID == null && BIN == null) openBrowser();
+for (const p of PIDS) arm(p);
+const BIN_WIDE = PIDS.length === 0 && BIN != null ? BIN : null;
+if (PIDS.length === 0 && BIN == null) openBrowser();
 
 /* The session is a bundle of signals; the BPF taps attach when the view mounts
  * (the signals get watched), reconcile against the armed set, and detach when

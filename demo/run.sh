@@ -27,6 +27,15 @@ ROLES=(order-router md-gateway risk-engine)
 # multi-runtime binary discovery. Python's feeds skip poly (its worker has no
 # REST-catalog prime step).
 PY_ROLE=risk-engine
+# Two more runtimes round out the demo stack, built on demand if their toolchain
+# is present (skipped otherwise, so node+python still run anywhere): a Go
+# gorilla/websocket worker (comm go-fanout, pure-Go crypto/tls) and a Rust
+# tokio-tungstenite worker (rustls; comm stays "rust-worker"). wssnoop decodes
+# all four — Go by stable symbol, rustls by symbol_prefix.
+GO_ROLE=go-fanout
+RUST_ROLE=rust-md
+# Every comm a demo worker can carry, for the cleanup sweeps below.
+DEMO_COMMS=("${ROLES[@]}" "$GO_ROLE" rust-worker)
 
 usage() {
   cat <<'EOF'
@@ -119,7 +128,7 @@ reap_jails() {
 # marker. A precise identity check, not a command-line substring match.
 is_demo_worker() {
   local c r; c="$(cat "/proc/$1/comm" 2>/dev/null)" || return 1
-  for r in "${ROLES[@]}"; do [[ "$c" == "$r" ]] && return 0; done
+  for r in "${DEMO_COMMS[@]}"; do [[ "$c" == "$r" ]] && return 0; done
   return 1
 }
 
@@ -142,7 +151,7 @@ stop() {
     done < "$PIDFILE"
     rm -f "$PIDFILE"
   fi
-  for r in "${ROLES[@]}"; do pkill -x "$r" 2>/dev/null || true; done
+  for r in "${DEMO_COMMS[@]}"; do pkill -x "$r" 2>/dev/null || true; done
   if have_docker; then $DKR rm -f "$CTR_NAME" >/dev/null 2>&1 || true; fi
 }
 
@@ -265,6 +274,31 @@ start_workers() {
     fi
     echo "$!" >> "$PIDFILE"
   done
+  start_extra_workers "$delay"
+}
+
+# Build + start the Go and Rust workers if their toolchains are present (else
+# skip quietly — node+python still run). Same connect-delay so wssnoop catches
+# their handshakes; pids recorded in $PIDFILE like the rest.
+start_extra_workers() {
+  local delay="${1:-0}"
+  if command -v go >/dev/null 2>&1; then
+    if (cd "$DEMO_DIR/goworker" && GOFLAGS=-mod=mod go build -o /tmp/go-worker .) >/tmp/wssnoop-go-build.log 2>&1; then
+      setsid /tmp/go-worker --role "$GO_ROLE" --feeds coinbase,kraken --delay "$delay" --recycle "$RECYCLE" \
+        >"/tmp/wssnoop-$GO_ROLE.log" 2>&1 </dev/null &
+      echo "$!" >> "$PIDFILE"
+    else echo ">> (go worker build failed — see /tmp/wssnoop-go-build.log; skipping)"; fi
+  fi
+  [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env" # prefer the rustup toolchain
+  if command -v cargo >/dev/null 2>&1; then
+    if (cd "$DEMO_DIR/rustworker" && cargo build --release) >/tmp/wssnoop-rust-build.log 2>&1; then
+      pkill -x rust-worker 2>/dev/null || true; sleep 1 # free /tmp/rust-worker before copy
+      cp "$DEMO_DIR/rustworker/target/release/rust-worker" /tmp/rust-worker
+      setsid /tmp/rust-worker --role "$RUST_ROLE" --feeds coinbase,kraken --delay "$delay" --recycle "$RECYCLE" \
+        >/tmp/wssnoop-rust.log 2>&1 </dev/null &
+      echo "$!" >> "$PIDFILE"
+    else echo ">> (rust worker build failed — see /tmp/wssnoop-rust-build.log; skipping)"; fi
+  fi
 }
 
 stop          # clear any prior run first
@@ -278,19 +312,21 @@ if [[ "$CMD" == "attach" ]]; then
   # wssnoop is live.
   start_workers 8000
   sleep 1
-  echo ">> workers up (connecting in ~7s); launching wssnoop…"
+  # Arm every worker we started (a pid-scoped tap each) so all runtimes decode at
+  # once — node/python (OpenSSL), Go (crypto/tls), rustls (symbol_prefix). --pid
+  # takes the whole comma list; bystanders on the box pay nothing.
+  pids="$(paste -sd, "$PIDFILE")"
+  echo ">> workers up (connecting in ~7s); launching wssnoop on pids: $pids"
   cd "$REPO_DIR"
-  exec "$YEET" run src/main.jsx -- --bin "$NODE"
+  exec "$YEET" run src/main.jsx -- --pid "$pids"
 fi
 
 # --start
 start_workers 0
 sleep 1
-echo ">> ${#ROLES[@]} workers up: ${ROLES[*]} ($PY_ROLE on python3, the rest on node)"
-echo ">> node workers hold coinbase + kraken + polymarket; $PY_ROLE (python) holds coinbase + kraken"
+n="$(wc -l < "$PIDFILE" | tr -d ' ')"
+echo ">> $n workers up: node (${ROLES[*]%% *}…), python ($PY_ROLE)$(command -v go >/dev/null && echo ", go ($GO_ROLE)")$(command -v cargo >/dev/null && echo ", rust ($RUST_ROLE)")"
 echo ">> logs: /tmp/wssnoop-<role>.log"
 echo ">>"
-echo ">> attach wssnoop to the node workers (static SSL — probe the exe):"
-echo ">>     $YEET run src/main.jsx -- --bin $NODE"
-echo ">> $PY_ROLE runs on python (dynamic libssl); attach it separately, e.g.:"
-echo ">>     $YEET run src/main.jsx -- --pid \$(pgrep -x $PY_ROLE)"
+echo ">> attach wssnoop to every worker at once (each runtime decodes via its own boundary):"
+echo ">>     $YEET run src/main.jsx -- --pid $(paste -sd, "$PIDFILE")"

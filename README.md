@@ -148,8 +148,9 @@ readlink /proc/<pid>/exe                            # the executable
 ldd "$(readlink /proc/<pid>/exe)" | grep -i ssl     # shared libssl? use that
 ```
 
-With no `--pid`, every process mapping `--bin` is traced (this is how the demo
-sees all three workers at once) — but note a `--bin`-only attach hooks the
+`--pid` takes one pid or several (`--pid a,b,c`) — the demo arms every worker
+this way, so all four runtimes decode at once. With no `--pid`, every process
+mapping `--bin` is traced instead — but a `--bin`-only attach hooks the
 processes that exist *at attach time*, so start the targets first.
 
 Keys: `/` search · `s` sort · `r` role · `i` idle rows · `a` rows-per-process ·
@@ -166,7 +167,39 @@ for help (and its shortcut) in the minibuffer.
 - **4 KB capture cap per SSL call** (`CHUNK` in `wssnoop.bpf.c`). One TLS
   record maxes near this; a larger coalesced read is reported as truncated
   rather than emitting garbage.
-- Hooks `SSL_read` / `SSL_write` (not the `_ex` variants). Stripped static
-  binaries may need the `offset:` attach option.
 - Export goes to the system clipboard via OSC52 — large captures may hit your
   terminal's clipboard size cap.
+
+### TLS runtime coverage
+
+wssnoop attaches whichever plaintext boundaries a process offers, best-effort:
+
+| Runtime | Boundary hooked |
+|---|---|
+| OpenSSL (Node, Python, Ruby, Rust native-tls, C/C++ …) | `SSL_read`/`SSL_write` **and** `SSL_read_ex`/`SSL_write_ex` (CPython uses the `_ex` pair) — in a mapped `libssl` or baked static into the exe |
+| Go (gorilla, net/http, anything on the stdlib) | `crypto/tls.(*Conn).Read`/`Write` (register ABI; reads goroutine-id-keyed) |
+| rustls (tokio-tungstenite, any pure-Rust TLS) | `ConnectionCommon::…PlaintextSink::write` + `CommonState::take_received_plaintext`, resolved by `symbol_prefix` (the mangled hash varies per build) |
+
+A process on a stack with none of these (a stripped static build, or a TLS lib
+we don't hook) shows up but decodes to nothing — it's marked **opaque** rather
+than hidden.
+
+### Production / stripped binaries
+
+What survives depends on the strip level, and it differs by runtime:
+
+- **Dynamically-linked OpenSSL is immune.** `SSL_*` live in `libssl`'s
+  `.dynsym`, which `strip` never removes — so Python `websockets`, dynamically
+  linked Rust native-tls / C++ keep decoding no matter how the *app* is built.
+- **Go, rustls, static-OpenSSL** put their symbols in `.symtab`, which a **full
+  strip removes** (`strip`, cargo `strip = true`, `go build -ldflags="-s -w"`) —
+  then the name/prefix attach can't resolve them. Not stripped → symbols are
+  just *mangled*, which the exact/`symbol_prefix` matching handles.
+- **For rustls, use `strip = "debuginfo"`** (not `strip = true`) in
+  `[profile.release]`: it drops DWARF (most of the size) but **keeps `.symtab`**,
+  so hooks still resolve. Same idea for C++: keep the symbol table, or ship a
+  separate debug file.
+- **Stripped Go stays recoverable in principle**: `-s -w` wipes `.symtab` but
+  the `.gopclntab` function table remains (the runtime needs it), so a
+  gopclntab-aware resolver can still find the functions — planned, not yet
+  wired.
