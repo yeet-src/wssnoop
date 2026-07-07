@@ -4,6 +4,7 @@
  * are built here too (from the generic factory in lib/heat.js): the ramp math is
  * generic, but the hue choices are a palette decision, so they belong here. */
 import { heatPalette } from "./lib/heat.js";
+import { applyTheme } from "./ui/theme.js";
 
 export const COL = {
   /* surface — explicit so the dashboard never shows through to the terminal
@@ -49,6 +50,19 @@ export const COL = {
     text: "#93a1a1",
   },
 };
+
+/* Install wssnoop's tones into the UI kit's semantic roles, so the kit widgets
+ * (button, minibuffer, pair, bsod, the tooltip highlight) paint in this palette
+ * without importing it. A load-time side effect: static imports resolve before
+ * the view mounts, so the roles are set before the first render. */
+applyTheme({
+  accent: COL.accent,
+  ink: COL.ink,
+  dim: COL.dim,
+  hover: COL.hover,
+  header: COL.header,
+  crash: COL.crash,
+});
 
 /* JSON token kind → color, for highlightable payload lines. */
 export const jsonColor = (kind) => COL.json[kind] ?? COL.json.text;

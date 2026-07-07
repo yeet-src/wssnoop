@@ -2,7 +2,7 @@
  * publishes its `title` to the shared `hoverTitle` signal on pointer-enter (the
  * minibuffer renders it) and clears it on leave; clicking runs `onClick` and
  * stops the event so it never trips a handler on the pane behind it. `active`
- * marks toggle / selected state (accent fill), hover lights the faint COL.hover.
+ * marks toggle / selected state (accent fill), hover lights the faint hover role.
  *
  * The button knows nothing of the minibuffer — the tooltip is global state by
  * design (see controls.js), so the toolbar and the hint share one source. Hover
@@ -13,7 +13,7 @@
 import { Box, Text, face, signal, computed } from "yeet:tui";
 
 import { hoverTitle } from "../controls.js";
-import { COL } from "../palette.js";
+import { theme } from "../ui/theme.js";
 
 /* Children and `active` may be plain or thunks — the toolbar's labels and
  * toggle state are live, so we resolve both reactively. `label` reads its thunk
@@ -24,12 +24,12 @@ const asText = (c) => (Array.isArray(c) ? c.join("") : `${c ?? ""}`);
 
 /* Separate the two concerns: the Box owns the background (so it fills the
  * padding too), the Text owns the ink. Background: active fills accent, a plain
- * hover lights the faint highlight (the same COL.hover the clickable rows use,
+ * hover lights the faint highlight (the same hover role the clickable rows use,
  * so buttons and rows read consistently), idle is transparent. Ink: explicit fg
  * on idle — a bare `dim` attr vanishes on the dark surface. */
-const bgFor = (active, hovered) => (active ? COL.accent : hovered ? COL.hover : undefined);
+const bgFor = (active, hovered) => (active ? theme.accent : hovered ? theme.hover : undefined);
 const inkFor = (active, hovered) =>
-  active ? { fg: COL.ink, bold: true } : hovered ? { fg: COL.accent, bold: true } : { fg: COL.dim };
+  active ? { fg: theme.ink, bold: true } : hovered ? { fg: theme.accent, bold: true } : { fg: theme.dim };
 
 export default function Button({ title = "", onClick, active = false }, children) {
   const hovered = signal(false);

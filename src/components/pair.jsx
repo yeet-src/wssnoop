@@ -12,15 +12,15 @@ import { Box, Text, fg, bold } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
 import { tip } from "../controls.js";
-import { COL } from "../palette.js";
+import { theme } from "../ui/theme.js";
 
 /* The shared tooltip: `desc` names the stat, then each side's label, with the
  * hovered side in its own color + bold and the other dimmed. */
 const tipFor = (desc, up, down, hotUp) => [
-  fg(COL.dim)(`${desc} · `),
-  hotUp ? pipe(up.label, fg(up.color), bold) : fg(COL.dim)(up.label),
-  fg(COL.dim)(" · "),
-  hotUp ? fg(COL.dim)(down.label) : pipe(down.label, fg(down.color), bold),
+  fg(theme.dim)(`${desc} · `),
+  hotUp ? pipe(up.label, fg(up.color), bold) : fg(theme.dim)(up.label),
+  fg(theme.dim)(" · "),
+  hotUp ? fg(theme.dim)(down.label) : pipe(down.label, fg(down.color), bold),
 ];
 
 /* `text` is a thunk (figures climb live). The figure renders plainly in its

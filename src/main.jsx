@@ -154,7 +154,7 @@ let teardown;
 try {
   teardown = mount((size) => <Root size={size} {...session} />);
 } catch (e) {
-  teardown = mount(() => <Bsod error={e} />); // setup threw → show it, don't dump a stack
+  teardown = mount(() => <Bsod error={e} title=":(  wssnoop hit an error" />); // setup threw → show it, don't dump a stack
 }
 
 /* `--testonly-exit-after-secs N` runs for N seconds, then unmounts (tearing the

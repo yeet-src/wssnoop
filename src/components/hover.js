@@ -10,15 +10,15 @@
 
 import { signal, computed } from "yeet:tui";
 
-import { COL } from "../palette.js";
+import { theme } from "../ui/theme.js";
 import { hoverTitle } from "../controls.js";
 
 const key = signal(null);
 
 /* `base` is the resting bg (default transparent); the element lights to
- * COL.hover under the pointer. Pass a base when the element must also be opaque
+ * theme.hover under the pointer. Pass a base when the element must also be opaque
  * at rest (e.g. a top-bar item that mustn't let neighbours overlap it). */
-export const hoverBg = (k, base) => computed(() => (key.get() === k ? COL.hover : base));
+export const hoverBg = (k, base) => computed(() => (key.get() === k ? theme.hover : base));
 
 /* Tooltip + highlight for a clickable element — use in place of `tip()` (it is
  * a superset). `t` may be a string or thunk, like `tip`. */
