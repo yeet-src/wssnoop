@@ -21,7 +21,8 @@ import {
   collapseFor, cycleGroup, COLLAPSE_STEPS, COLLAPSE_LABELS,
   sortKey, filters, tip,
 } from "../controls.js";
-import { connMetric, recentBytes, rankMap } from "../lib/rank.js";
+import { connMetric, recentBytes } from "../lib/rank.js";
+import { rankMap } from "../lib/rankmap.js";
 import { procInfo, resolve } from "../probes/procinfo.js";
 import { resolvePeers } from "../probes/peers.js";
 

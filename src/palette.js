@@ -1,7 +1,10 @@
 /* wssnoop/palette — the presentation palette. Solarized-ish tones, chosen to
  * read on both light and dark terminals. Shared across the UI components; the
- * data layers (lib/*, state.js) never see a color. (The two heat *ramps* for
- * the sparkline live in lib/format.js, next to the numbers they encode.) */
+ * data layers (lib/*, state.js) never see a color. The sparkline heat *ramps*
+ * are built here too (from the generic factory in lib/heat.js): the ramp math is
+ * generic, but the hue choices are a palette decision, so they belong here. */
+import { heatPalette } from "./lib/heat.js";
+
 export const COL = {
   /* surface — explicit so the dashboard never shows through to the terminal
    * default; a hair darker than the sparkline TRACK (#161b22) so the idle rails
@@ -52,3 +55,17 @@ export const jsonColor = (kind) => COL.json[kind] ?? COL.json.text;
 
 export const roleColor = (role) =>
   role === "client" ? COL.client : role === "server" ? COL.server : COL.unknown;
+
+/* Sparkline heat variants — one hue pair per table layer, so the connection
+ * rows, the per-process aggregate, and the global bar read distinct at a glance
+ * (warm = egress/up, cool = ingress/down within each; distinct families across).
+ * The ramp machinery is generic (lib/heat.js); these are the wssnoop choices. */
+const HUES = {
+  conn: { up: 0xf5a623, down: 0x1fb6a6 }, // amber / teal
+  agg: { up: 0xb36ae2, down: 0x5b6cf0 }, // violet / indigo
+  global: { up: 0xffd24d, down: 0x35c7e8 }, // gold / cyan
+};
+
+/* The heat ramps for a sparkline variant: `up` (fg, top half = egress), `down`
+ * (bg, bottom half = ingress), and the shared idle `track`. */
+export const heatFor = (variant = "conn") => heatPalette(HUES[variant] ?? HUES.conn);

@@ -24,9 +24,13 @@ import Button from "./button.jsx";
 import Pair from "./pair.jsx";
 import { hoverTip, hoverBg } from "./hover.js";
 import { COL, roleColor, jsonColor } from "../palette.js";
-import { fmtBytes, fmtAgo, hexDump, jsonTokens, parseJson, utf8Bytes } from "../lib/format.js";
+import { fmtBytes, fmtAgo } from "../lib/fmt.js";
+import { hexDump } from "../lib/hexdump.js";
+import { jsonTokens, parseJson } from "../lib/json.js";
+import { utf8Bytes } from "../lib/bytes.js";
 import { toJsonl, messageJson } from "../lib/export.js";
-import { compile, messageText } from "../lib/query.js";
+import { compile } from "../lib/query.js";
+import { messageText } from "../lib/message.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import { destOf, destTip, peerInfo } from "../probes/peers.js";
 import {

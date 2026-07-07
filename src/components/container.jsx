@@ -18,7 +18,8 @@ import Agg from "./agg.jsx";
 import { COL } from "../palette.js";
 import { GAP, HANDLE } from "./columns.js";
 import { collapseFor, cycleGroup, COLLAPSE_LABELS, sortKey, filters, tip } from "../controls.js";
-import { recentBytes, groupMetric, rankMap } from "../lib/rank.js";
+import { recentBytes, groupMetric } from "../lib/rank.js";
+import { rankMap } from "../lib/rankmap.js";
 
 const glyph = (n) => (n === 0 ? "▸" : "▾");
 

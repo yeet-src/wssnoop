@@ -11,7 +11,7 @@
 
 import { signal } from "yeet:tui";
 
-import { containerOf } from "../lib/container.js";
+import { containerOf } from "../lib/cgroup.js";
 import { classify } from "./runtimes.js";
 
 const info = signal({}); // pid -> identity, republished as each resolves

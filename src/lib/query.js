@@ -18,18 +18,13 @@
  * existing text search is unchanged; the term grammar only kicks in once a
  * field reference appears. Pure — no signals, no UI. */
 
-import { parseJson } from "./format.js";
+import { parseJson } from "./json.js";
 
 /* Encoding → (record → value tree). The body decoders the field grammar can
  * reach. Keyed by the `$<enc>` prefix; `json` is the default. */
 const ENCODINGS = {
   json: (rec) => parseJson(rec?.text),
 };
-
-/* The plain-text haystack for a retained message record — its opcode name, the
- * decoded text, and any inflate error. Shared by the inspector's message search
- * and the table's per-service match counting so both test the same thing. */
-export const messageText = (rec) => `${rec.name ?? ""} ${rec.text ?? ""}${rec.inflateError ?? ""}`;
 
 const OPCHARS = "<>=!~";
 const isWS = (c) => c === " " || c === "\t";

@@ -1,11 +1,11 @@
-/* rank — the ordering metrics for the grouped table, one pure place so the
- * group order (root) and the connection order within a group (group.jsx) agree.
+/* rank — the wssnoop table's ordering *metrics*: how much a connection or group
+ * "weighs" under each sort key, one pure place so the group order (root) and the
+ * connection order within a group (group.jsx) agree. The generic ranking itself
+ * — items → rank map, descending by metric — is `rankMap` (lib/rankmap.js); this
+ * file supplies the domain metrics it ranks by.
  *
- * Sorting is expressed as a *rank map* (id → 0-based index, biggest metric
- * first), not a re-sorted array: the UI keeps elements in stable identity order
- * and feeds the rank into each node's reactive `order` prop, so a re-rank (or a
- * clock tick under the "recent" key) just re-flows the layout order — it never
- * rebuilds the row structure. Ranks are small ints, which `order` needs (a raw
+ * A clock tick under the "recent" key re-ranks and just re-flows the layout
+ * order; ranks are small ints, which the `order` prop needs (a raw
  * byte/timestamp metric would overflow). */
 
 /* Bytes through a hist within the current viz window — the "recent" key and the
@@ -26,12 +26,3 @@ export const groupMetric = (g, key, now, span) =>
     : key === "bytes"
       ? lifeBytes(g.hist)
       : recentBytes(g.hist, now, span);
-
-/* items → Map(id → rank), descending by metric. Stable: ties keep input order
- * (Array.prototype.sort is stable), so equal-metric rows don't jitter. */
-export const rankMap = (items, idOf, metricOf) => {
-  const sorted = [...items].sort((a, b) => metricOf(b) - metricOf(a));
-  const m = new Map();
-  sorted.forEach((x, i) => m.set(idOf(x), i));
-  return m;
-};

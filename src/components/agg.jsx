@@ -18,7 +18,7 @@ import { Box, Text, fg } from "yeet:tui";
 
 import { aggMetric, tableMatcher, search, tip } from "../controls.js";
 import { COL } from "../palette.js";
-import { fmtBytes } from "../lib/format.js";
+import { fmtBytes } from "../lib/fmt.js";
 
 const twoTone = (up, dn) => [fg(COL.out)(up), fg(COL.dim)(" "), fg(COL.in)(dn)];
 

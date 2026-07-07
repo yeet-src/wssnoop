@@ -14,11 +14,12 @@
  * cb.touch() (a Signal set), which can't happen during graph evaluation — so it
  * must run from a timer callback, outside the render. An Effect owns the timer's
  * lifecycle (start on mount, clear on unmount). `variant` picks the hue pair
- * (see lib/format.js) so a process/global aggregate reads distinct from a row. */
+ * (see palette.js) so a process/global aggregate reads distinct from a row. */
 
 import { Box, CellBuffer, Effect, rgb } from "yeet:tui";
 
-import { heatFor, fmtBytes, fmtAgo } from "../lib/format.js";
+import { fmtBytes, fmtAgo } from "../lib/fmt.js";
+import { heatFor } from "../palette.js";
 import {
   cursorFrac, cursorPinned, moveCursor, leaveCursor, toggleCursorPin,
 } from "../controls.js";

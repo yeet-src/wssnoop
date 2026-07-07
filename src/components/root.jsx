@@ -25,7 +25,8 @@ import {
   vizRange, sortKey, filters, selected, search, matches, searchHasFields, isInspecting,
   destWidth, dragging, endColDrag, helpOpen, browserOpen, isBrowsing,
 } from "../controls.js";
-import { groupMetric, rankMap } from "../lib/rank.js";
+import { groupMetric } from "../lib/rank.js";
+import { rankMap } from "../lib/rankmap.js";
 import { mergeHists } from "../lib/timehist.js";
 import { procInfo } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";

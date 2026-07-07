@@ -7,22 +7,8 @@
  * via tty) lives at the component edge. */
 
 import { DIR_WRITE } from "./decode.js";
-import { parseJson } from "./format.js";
-
-/* btoa isn't in bare V8; hand-roll base64 for the raw-bytes fallback. */
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-export function base64(u8) {
-  if (!u8 || !u8.length) return "";
-  let out = "";
-  for (let i = 0; i < u8.length; i += 3) {
-    const a = u8[i], b = u8[i + 1], c = u8[i + 2];
-    const n = (a << 16) | ((b ?? 0) << 8) | (c ?? 0);
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];
-    out += i + 1 < u8.length ? B64[(n >> 6) & 63] : "=";
-    out += i + 2 < u8.length ? B64[n & 63] : "=";
-  }
-  return out;
-}
+import { base64 } from "./bytes.js";
+import { parseJson } from "./json.js";
 
 /* One retained message → a test-suite-friendly record. `dir` names the flow
  * from the traced process's view; `json`/`text` carry the decoded payload, or
