@@ -168,7 +168,7 @@ export default function Toolbar({ groups, global, stats, status, now, span, size
           <Box width={W_ROLE} {...tip("ROLE: client (we opened it) or server (we serve it)")}>
             <Text fg={COL.header} break="none">ROLE</Text>
           </Box>
-          <Box width={() => geom().dest} overflow="hidden" {...tip("DEST: destination wss:// URL for client connections; '?' for served ones")}>
+          <Box width={() => geom().dest} overflow="hidden" {...tip("DEST: destination wss:// URL from the handshake; ~ip:port when only the peer is known (no handshake); 'unknown connection' when neither is")}>
             <Text fg={COL.header} break="none">DEST</Text>
           </Box>
           <Box width={W_MSG} {...tip("MSG: WebSocket messages sent (↑) and received (↓)")}>

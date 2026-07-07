@@ -3,31 +3,73 @@
 § feedback / rqmts
 
 ☑ search — the $.field query language now works in the TABLE, not just the
-  inspector: a field query annotates rather than hides, driving the match counts
-  below. Plain-text still filters connections by URL.
-☑ aggregation — bandwidth is the default per-node aggregate (↑/↓ on ALL + every
-  process/container header); the agg button / m toggles bandwidth ⇄ message
-  count. (controls.aggMetric, components/agg.jsx)
+  inspector: a field query annotates rather than hides, driving the match
+  counts below. Plain-text still filters connections by URL.
+☑ aggregation — bandwidth is the default per-node aggregate (↑/↓ on ALL +
+  every process/container header); the agg button / m toggles bandwidth ⇄
+  message count. (controls.aggMetric, components/agg.jsx)
 ☑ error detection — done via SEARCH as suggested, not a bespoke feature: a
-  $.field query (e.g. $.error) turns the per-node aggregate into matching / total
-  messages, live, flagged red when >0 — per service AND per connection row. So
-  "show error per service" = type $.error and watch the counts.
+  $.field query (e.g. $.error) turns the per-node aggregate into matching /
+  total messages, live, flagged red when >0 — per service AND per connection
+  row. So "show error per service" = type $.error and watch the counts.
 
 ¶ These are ecs services btw (relevant to the egress-cost concern above).
 
-☑ hardcoded support for standard binaries — no --bin/--pid now auto-discovers a
-  running node/deno/bun/python/ruby and traces its SSL binary; --bin is only for
-  extras. (probes/probe.js knownRuntimeBin / KNOWN_BINS)
+☑ hardcoded support for standard binaries — no --bin/--pid now
+  auto-discovers a running node/deno/bun/python/ruby and traces its SSL
+  binary; --bin is only for extras. (probes/probe.js knownRuntimeBin /
+  KNOWN_BINS)
+
+§ TLS-library coverage (outbound wss:// clients)
+
+¶ The fanout stack dials wss:// out as a CLIENT, so TLS is in-process and
+  the socket-layer plaintext tap sees only ciphertext — coverage is per TLS
+  library, at the SSL_read/SSL_write boundary. One item each. (The plaintext
+  tap already covers the ALB-terminated INBOUND leg for every language;
+  these are the outbound-client gaps.) Write it generally, not privileging
+  this set.
+
+☐ Python websockets — confirm the OpenSSL path with a client demo (high)
+  stdlib ssl → dynamic libssl.so, python3 auto-discovered; should already
+  work (the sweet spot). Add an outbound wss:// python client to the demo
+  and verify decode end to end.
+☐ Rust tokio-tungstenite — tap native-tls, detect and flag rustls (med)
+  native-tls → OpenSSL (tappable, dynamic or vendored-static); rustls → pure
+  Rust, no SSL_read/write (blind). Indistinguishable by name — scan the
+  pid's maps/exe for libssl or an SSL_read symbol; tap native-tls, mark
+  rustls opaque.
+☐ C++ uWebSockets/uSockets — attach to static OpenSSL/BoringSSL in the exe
+  (med) Vendored, usually statically linked into the app exe; tappable iff
+  SSL_read/SSL_write survive (release/stripped builds often localize them).
+  Needs exe symbol resolution; BoringSSL uses the same symbol names.
+☐ Go gorilla/websocket — Go-specific uprobes, a separate feature (low ugh)
+  Pure-Go crypto/tls, no OpenSSL symbols at all — blind to the SSL uprobe
+  regardless of role. Needs uprobes on crypto/tls.(*Conn).Read/Write with
+  the Go ABI + Go symbol table (uretprobe/arg handling differ). Large,
+  standalone; flag Go connections as opaque until then.
+
+☑ Enabler: classify a process by SSL reachability, not the KNOWN_BINS name
+  list — so it privileges no runtime. discover.sslClass returns libssl (maps
+  a libssl, any language) / runtime (static-OpenSSL exe, name hint) /
+  opaque; procinfo.classifySsl caches it per pid (raced maps query); the
+  browser gates and labels on it. A Rust native-tls or dynamically-linked
+  C++ app now shows up automatically; Go/rustls fall out as opaque.
+
+¶ Still blocked, the static-symbol half: an exe that statically links
+  OpenSSL but isn't a known runtime reads as opaque — the graph exposes maps
+  + exe but no ELF symbol table, so "does the exe export SSL_read" isn't
+  answerable client-side. Needs a daemon symbol field or an attach-and-see
+  probe.
 
 § etc
 
-☑ show scrollbars only when active (like web overlay scrollbars) — the inspector
-  overlay scrollbar now fades ~1.2s after the last scroll gesture.
-☑ "Waiting for messages" copy is incorrect when connection is closed — now reads
-  "connection closed · no messages were captured".
+☑ show scrollbars only when active (like web overlay scrollbars) — the
+  inspector overlay scrollbar now fades ~1.2s after the last scroll gesture.
+☑ "Waiting for messages" copy is incorrect when connection is closed — now
+  reads "connection closed · no messages were captured".
 ☐ colocate "copy" button wiht message json
-☐ message content as overlayed panel or something, not expanding inline
-  the scrollable table
+☐ message content as overlayed panel or something, not expanding inline the
+  scrollable table
 ☐ improve proc details??
 ☐ activity bar drag-2-resize really flaky
 ☐ interactive picker for process (node arg)

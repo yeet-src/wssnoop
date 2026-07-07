@@ -22,7 +22,7 @@ const SECTIONS = [
     h: "Reading the table",
     rows: [
       ["ROLE", "client = we dialed out · server = we serve it"],
-      ["DEST", "destination wss:// (or ws://) URL · '?' when unknown"],
+      ["DEST", "destination wss:// (or ws://) URL · ~ip:port when only the peer is known · 'unknown connection' otherwise"],
       ["MSG ↑/↓", "WebSocket messages sent / received"],
       ["ACTIVITY", "bytes/sec per column · upper ▀ sent, lower ▄ received · brighter = more"],
       ["↑/↓ on headers", "aggregate per process/container/ALL · bandwidth or messages (agg / m)"],

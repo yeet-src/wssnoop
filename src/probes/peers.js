@@ -1,29 +1,50 @@
-/* wssnoop/peers — best-effort remote endpoints for a process's TCP connections,
- * from the system graph. The BPF tap learns a connection's wss:// URL only from
- * the HTTP upgrade handshake; a connection that predates the attach has no
- * handshake, so its dest stays "?". The kernel still knows each socket's peer
- * address, so we recover it: a process's socket fd shares an inode with a
- * /proc/net/tcp entry, which carries the remote ip:port.
+/* wssnoop/peers — best-effort remote endpoint for a connection whose wss:// URL
+ * was never captured. The BPF tap learns the URL only from the HTTP upgrade
+ * handshake; a connection that predates the attach has no handshake, so its
+ * dest stays "?". Two kernel sources recover a peer for it, most-confident
+ * first:
  *
- * This deliberately stays process-level. It can't map a specific SSL* stream to
- * a specific socket — node's TLS uses memory BIO pairs, so the SSL object holds
- * no fd to read. So it exposes the *set* of endpoints a process is connected to:
- * when that set is a single endpoint a handshake-less dest is unambiguous and we
- * fill it (`inferredDest`); otherwise the UI shows the set as a peers hint and
- * leaves dest "?". Lazy + cached + polled, like procinfo.
+ *   1. The socket-layer connect tap (netconn) records each outbound
+ *      connection's exact remote ip:port, keyed by its `struct sock*`. A
+ *      plaintext conn's `ssl` field IS that pointer, so it keys straight in —
+ *      the precise endpoint even when the process has many. (A TLS conn's SSL*
+ *      pointer simply misses.)
+ *   2. Failing that, the system graph: a process's socket fds share inodes with
+ *      /proc/net/tcp entries carrying the remote ip:port. This is process-level
+ *      (node's TLS uses memory BIO pairs, so the SSL object holds no fd) — it
+ *      exposes the *set* of endpoints; a sole endpoint is unambiguous, several
+ *      leave the pin as a "one of N" hint. Lazy + cached + polled, like procinfo.
  *
  *   resolvePeers(pid)        // fire-and-forget; cached, cheap to call per render
  *   peerInfo.get()[pid]      // -> { endpoints: string[] } | undefined
- *   inferredDest(pid)        // -> "ip:port" when exactly one endpoint, else null
- *   destOf(conn)             // handshake dest, falling back to an inferred peer
+ *   destOf(conn)             // handshake URL, else an inferred peer, else unknown #id
+ *   destTip(conn)            // self-explaining tooltip for whichever of those it is
  */
 
-import { signal } from "yeet:tui";
+import { computed, signal } from "yeet:tui";
+
+import { connections } from "./netconn.js";
 
 const info = signal({}); // pid -> { endpoints }
 const seen = new Set(); // pids we're tracking
 
 export const peerInfo = info;
+
+/* sk (struct sock*) -> "ip:port", the exact peer of every live outbound
+ * connection the connect tap has seen. A plaintext conn's `ssl` field is the
+ * same pointer, so this pins its endpoint precisely. */
+const connBySk = computed(() => {
+  const m = new Map();
+  for (const e of connections.get()) m.set(e.sk, `${e.addr}:${e.port}`);
+  return m;
+});
+const socketDest = (conn) => {
+  try {
+    return connBySk.get().get(BigInt(conn.ssl)) ?? null;
+  } catch {
+    return null;
+  }
+};
 
 const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
 const race = (p, ms) => Promise.race([p, timeout(ms)]);
@@ -75,31 +96,42 @@ export function resolvePeers(pid) {
   if (timer == null) timer = setInterval(() => poll().catch(() => {}), 5000);
 }
 
-/* A handshake-less dest is unambiguous only when the process talks to exactly
- * one endpoint — then every stream of that process must be to it. */
-export const inferredDest = (pid) => {
-  const eps = info.get()[pid]?.endpoints;
-  return eps && eps.length === 1 ? eps[0] : null;
+/* The best-known remote peer for a handshake-less conn, most-confident first:
+ * the exact socket peer (plaintext), the process's sole /proc endpoint, else the
+ * endpoint set (ambiguous — can't pin which). null when the kernel knows no peer
+ * for the process at all. */
+const inferPeer = (conn) => {
+  const exact = socketDest(conn);
+  if (exact) return { kind: "socket", addr: exact };
+  const eps = info.get()[conn.pid]?.endpoints || [];
+  if (eps.length === 1) return { kind: "sole", addr: eps[0] };
+  if (eps.length > 1) return { kind: "ambiguous", addr: eps[0], eps };
+  return null;
 };
 
 /* The dest to display: the real wss:// URL from the handshake, else an inferred
- * peer marked "~" (so it never reads as a captured URL), else "?". */
+ * peer marked "~" (so it never reads as a captured URL) with a "+N" when it's
+ * one of several candidates, else "unknown connection #<id>" — the word names
+ * what's unknown, and the id is the connection's own display id (the same #a1b2
+ * shown on hover), stable and distinct so several unknowns stay tellable apart. */
 export const destOf = (conn) => {
   if (conn.dest !== "?") return conn.dest;
-  const ep = inferredDest(conn.pid);
-  return ep ? `~${ep}` : "?";
+  const p = inferPeer(conn);
+  if (!p) return `unknown connection #${conn.conn}`;
+  return p.kind === "ambiguous" ? `~${p.addr} +${p.eps.length - 1}` : `~${p.addr}`;
 };
 
-/* Self-explaining tooltip for the dest, covering all three states: a captured
- * URL, an inferred sole endpoint, or genuinely unknown (with the peer set when
- * the ambiguity is the reason). */
+/* Self-explaining tooltip for the dest, covering every state destOf can land in:
+ * a captured URL, an exact socket peer, an inferred sole endpoint, one of several
+ * candidates, or genuinely unknown. */
 export const destTip = (conn) => {
   if (conn.dest !== "?") return `destination · ${conn.dest}`;
-  const ep = inferredDest(conn.pid);
-  if (ep)
-    return `destination (inferred) · ${ep} · no handshake seen (the connection predates the attach), but it's the process's only socket endpoint, so the stream must be it`;
-  const eps = peerInfo.get()[conn.pid]?.endpoints || [];
-  return eps.length
-    ? `destination unknown · predates the attach (no handshake) and the process has several socket endpoints, so it can't be pinned to one: ${eps.join(", ")}`
-    : `destination unknown · the connection predates the attach, so its wss:// URL (sent in the handshake) was never captured`;
+  const p = inferPeer(conn);
+  if (!p)
+    return `destination unknown · no wss:// URL was captured (the connection predates the attach, so its handshake was never seen) and the kernel reports no remote peer for the process; #${conn.conn} is this connection's id (shown on hover), a stable label to tell the unknowns apart`;
+  if (p.kind === "socket")
+    return `destination (peer) · ${p.addr} · no handshake seen, but the socket tap caught this connection's connect(), so this is its exact remote endpoint`;
+  if (p.kind === "sole")
+    return `destination (inferred) · ${p.addr} · no handshake seen (predates the attach), but it's the process's only socket endpoint, so the stream must be it`;
+  return `destination · one of ${p.eps.length} · predates the attach (no handshake) and the process has several socket endpoints, so it can't be pinned to one: ${p.eps.join(", ")}`;
 };
