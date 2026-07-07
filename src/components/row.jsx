@@ -11,12 +11,12 @@
 import { Box, Text, face, fg } from "yeet:tui";
 
 import Sparkline from "./sparkline.jsx";
-import Pair from "./pair.jsx";
+import Pair from "../ui/pair.jsx";
 import { COL, roleColor } from "../palette.js";
 import { W_ROLE, W_MSG, GAP, INDENT, HANDLE } from "./columns.js";
-import { tip, inspect, searchHasFields, tableMatcher } from "../controls.js";
+import { inspect, searchHasFields, tableMatcher } from "../controls.js";
 import { destOf, destTip } from "../probes/peers.js";
-import { hoverTip, hoverBg } from "./hover.js";
+import { tip, hoverTip, hoverBg } from "../ui/tooltip.js";
 
 const matchTip = (c) =>
   `search matches · messages matching the active $.field query on this connection / total retained (${c.msgs.size})`;

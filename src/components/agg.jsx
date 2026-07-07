@@ -16,7 +16,8 @@
 
 import { Box, Text, fg } from "yeet:tui";
 
-import { aggMetric, tableMatcher, search, tip } from "../controls.js";
+import { aggMetric, tableMatcher, search } from "../controls.js";
+import { tip } from "../ui/tooltip.js";
 import { COL } from "../palette.js";
 import { fmtBytes } from "../lib/fmt.js";
 

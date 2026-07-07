@@ -20,9 +20,9 @@
 import { Box, Text, Layer, bold, italic, fg, computed } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import Button from "./button.jsx";
-import Pair from "./pair.jsx";
-import { hoverTip, hoverBg } from "./hover.js";
+import Button from "../ui/button.jsx";
+import Pair from "../ui/pair.jsx";
+import { tip, flash, hoverTip, hoverBg } from "../ui/tooltip.js";
 import { COL, roleColor, jsonColor } from "../palette.js";
 import { fmtBytes, fmtAgo } from "../lib/fmt.js";
 import { hexDump } from "../lib/hexdump.js";
@@ -37,8 +37,6 @@ import {
   selected,
   selectedConn,
   closeInspector,
-  tip,
-  flash,
   search,
   inspectScroll as scroll,
   inspectScrollAt as scrollAt,

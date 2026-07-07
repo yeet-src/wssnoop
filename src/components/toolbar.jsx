@@ -10,10 +10,10 @@
 
 import { Box, Text, face, computed, signal } from "yeet:tui";
 
-import Button from "./button.jsx";
+import Button from "../ui/button.jsx";
 import Sparkline from "./sparkline.jsx";
 import Agg from "./agg.jsx";
-import { hoverTip, hoverBg } from "./hover.js";
+import { tip, hoverTip, hoverBg } from "../ui/tooltip.js";
 import { COL } from "../palette.js";
 import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
 import {
@@ -26,7 +26,7 @@ import {
   focusKey, clearFocus,
   destWidth, dragging, startColDrag, resetColWidth,
   toggleHelp,
-  titles, tip,
+  titles,
 } from "../controls.js";
 
 /* The column-resize handle: a 1-cell separator between the left region and the

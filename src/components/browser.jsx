@@ -15,7 +15,7 @@ import { procInfo, resolve, sslInfo, classifySsl } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";
 import { isArmed, toggleArm, tapOutcome } from "../controls.js";
 import { COL } from "../palette.js";
-import { hoverBg, hoverTip } from "./hover.js";
+import { hoverBg, hoverTip } from "../ui/tooltip.js";
 
 const TLS_PORTS = new Set([443, 8443, 9443]); // outbound TLS — the wss:// default and common alts
 const distinctPeers = (arr) => new Set(arr.map((c) => `${c.addr}:${c.port}`)).size;

@@ -5,15 +5,15 @@
  * marks toggle / selected state (accent fill), hover lights the faint hover role.
  *
  * The button knows nothing of the minibuffer — the tooltip is global state by
- * design (see controls.js), so the toolbar and the hint share one source. Hover
+ * design (see tooltip.js), so the toolbar and the hint share one source. Hover
  * is a local boolean: it persists because the buttons mount once (the inspector
  * is memoized in root, so its subtree no longer re-mints each heartbeat).
  */
 
 import { Box, Text, face, signal, computed } from "yeet:tui";
 
-import { hoverTitle } from "../controls.js";
-import { theme } from "../ui/theme.js";
+import { hoverTitle } from "./tooltip.js";
+import { theme } from "./theme.js";
 
 /* Children and `active` may be plain or thunks — the toolbar's labels and
  * toggle state are live, so we resolve both reactively. `label` reads its thunk

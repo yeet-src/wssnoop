@@ -11,8 +11,8 @@
 import { Box, Text, fg, bold } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import { tip } from "../controls.js";
-import { theme } from "../ui/theme.js";
+import { tip } from "./tooltip.js";
+import { theme } from "./theme.js";
 
 /* The shared tooltip: `desc` names the stat, then each side's label, with the
  * hovered side in its own color + bold and the other dimmed. */

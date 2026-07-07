@@ -11,13 +11,14 @@
 
 import { Box, Text, face, computed } from "yeet:tui";
 
-import Button from "./button.jsx";
+import Button from "../ui/button.jsx";
 import Group from "./group.jsx";
 import Sparkline from "./sparkline.jsx";
 import Agg from "./agg.jsx";
 import { COL } from "../palette.js";
 import { GAP, HANDLE } from "./columns.js";
-import { collapseFor, cycleGroup, COLLAPSE_LABELS, sortKey, filters, tip } from "../controls.js";
+import { collapseFor, cycleGroup, COLLAPSE_LABELS, sortKey, filters } from "../controls.js";
+import { tip } from "../ui/tooltip.js";
 import { recentBytes, groupMetric } from "../lib/rank.js";
 import { rankMap } from "../lib/rankmap.js";
 

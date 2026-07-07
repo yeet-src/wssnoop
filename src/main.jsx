@@ -32,7 +32,7 @@
 import { mount } from "yeet:tui";
 
 import Root from "./components/root.jsx";
-import Bsod from "./components/bsod.jsx";
+import Bsod from "./ui/bsod.jsx";
 import { createSession } from "./state.js";
 import {
   isInspecting,

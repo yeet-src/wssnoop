@@ -8,7 +8,7 @@
 import { Box, Text, bold, italic, fg } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import { theme } from "../ui/theme.js";
+import { theme } from "./theme.js";
 
 export default function Bsod({ error, title = ":(  hit an error" }) {
   const lines = String(error?.stack ?? error?.message ?? error).split("\n");

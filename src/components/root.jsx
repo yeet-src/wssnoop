@@ -17,14 +17,18 @@ import Container from "./container.jsx";
 import Inspector from "./inspector.jsx";
 import Browser from "./browser.jsx";
 import Help from "./help.jsx";
-import Minibuffer from "./minibuffer.jsx";
+import Minibuffer from "../ui/minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
 import { COL } from "../palette.js";
 import { layout, START, DEST_MIN } from "./columns.js";
 import {
   vizRange, sortKey, filters, selected, search, matches, searchHasFields, isInspecting,
-  destWidth, dragging, endColDrag, helpOpen, browserOpen, isBrowsing,
+  destWidth, dragging, endColDrag, helpOpen, browserOpen, isBrowsing, cursorReadout,
 } from "../controls.js";
+
+/* The minibuffer's resting cheat sheet (shown when nothing is hovered). */
+const HINT =
+  "click a connection → inspect · decode · ⊙ focus the kernel · ⧉ copy fixtures    ·    / search · q quit";
 import { groupMetric } from "../lib/rank.js";
 import { rankMap } from "../lib/rankmap.js";
 import { mergeHists } from "../lib/timehist.js";
@@ -181,7 +185,7 @@ export default function Root({ size, groups, global, stats, status, clock }) {
        </Layer>
       </Box>
       <SearchBar />
-      <Minibuffer />
+      <Minibuffer hint={HINT} priority={cursorReadout} />
     </Box>
   );
 }

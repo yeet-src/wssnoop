@@ -5,17 +5,15 @@
  * never reads these; the components read both and apply controls to the raw
  * groups at render time (filter -> sort -> slice). Keeping them here means the
  * toolbar buttons and the layout share one source of truth, and a control
- * change repaints without touching the BPF tap.
- *
- * Mouse-driven UI convention: every Button writes its tooltip to `hoverTitle`
- * on pointer-enter and clears it on leave; the minibuffer renders it. The title
- * is global state precisely so the Button doesn't need to know the minibuffer.
+ * change repaints without touching the BPF tap. (The hover-tooltip bus the
+ * toolbar and minibuffer share lives in the UI kit, ui/tooltip.js.)
  */
 
 import { signal, computed } from "yeet:tui";
 
 import { compile } from "./lib/query.js";
 import { messageText } from "./lib/message.js";
+import { flash } from "./ui/tooltip.js";
 
 const wrap = (arr, v, dir = 1) => {
   const i = arr.indexOf(v);
@@ -301,28 +299,3 @@ export const dragging = signal(false);
 export const startColDrag = () => dragging.set(true);
 export const endColDrag = () => dragging.set(false);
 export const resetColWidth = () => destWidth.set(null);
-
-export const hoverTitle = signal(""); // current tooltip (string | thunk), resolved in the minibuffer
-
-/* Transient status line (e.g. "copied 42 messages"). Shown in the minibuffer
- * over the hover tooltip for a moment, then clears itself. A token guards
- * against an older flash clearing a newer one. */
-export const toast = signal("");
-let toastN = 0;
-export function flash(msg, ms = 2500) {
-  toast.set(msg);
-  const n = ++toastN;
-  setTimeout(() => {
-    if (n === toastN) toast.set("");
-  }, ms);
-}
-
-/* Spreadable hover-tooltip handlers for ANY Box (not just Button): `<Box
- * {...tip("…")}>`. `t` may be a string or a thunk; we stash it *unresolved* so
- * the minibuffer re-evaluates it each frame — a thunk over live values (a
- * connection's counts, a control's current state) then stays current while the
- * pointer rests on it. */
-export const tip = (t) => ({
-  onMouseEnter: () => hoverTitle.set(t),
-  onMouseLeave: () => hoverTitle.set(""),
-});
