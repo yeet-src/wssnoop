@@ -23,6 +23,7 @@
 
 import { computed, signal } from "yeet:tui";
 
+import { race } from "../lib/race.js";
 import { connections } from "./netconn.js";
 
 const info = signal({}); // pid -> { endpoints }
@@ -45,9 +46,6 @@ const socketDest = (conn) => {
     return null;
   }
 };
-
-const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
-const race = (p, ms) => Promise.race([p, timeout(ms)]);
 
 const TCP = `{ tcp { remote_address { addr } inode state } tcp6 { remote_address { addr } inode state } }`;
 

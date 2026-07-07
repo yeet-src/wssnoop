@@ -11,11 +11,11 @@
 
 import { from } from "yeet:tui";
 
+import { race } from "../lib/race.js";
+
 /* Container summaries are small, but a wedged Docker socket shouldn't stall us
  * — race every poll against a short timeout (see README's graph caveat). */
 const QUERY = `{ docker { list_containers { id names image state } } }`;
-const race = (p, ms) =>
-  Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
 
 export const containers = from((state) => {
   let stopped = false;

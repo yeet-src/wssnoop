@@ -73,20 +73,30 @@ src/bpf/wssnoop.bpf.c   the tap: SSL_read/SSL_write uprobes → ringbuf; a live
 src/probes/probe.js     capture: BPF lifecycle, raw chunks up, focus filter down
 src/probes/procinfo.js  process identity (comm/cmdline/exe/container) via the graph
 src/lib/decode.js       data: chunks → handshake + RFC-6455 frames → messages
-src/lib/timehist.js     data: a time-bucketed up/down byte ring per stream
-src/lib/{format,rank,export}.js  pure helpers: formatting + JSON highlight, sort
-                        metrics, JSONL/base64 export
+src/lib/{rank,export,message}.js  wssnoop data helpers: sort metrics, JSONL export,
+                        a message record's searchable text
+src/lib/{fmt,json,hexdump,bytes,heat,rankmap,query,timehist,cgroup}.js
+                        kit-generic pure primitives (no wssnoop domain): byte/time
+                        formatters, JSON parse+highlight, hex dump, utf8/base64,
+                        the sparkline heat-ramp factory, rank map, the filter DSL,
+                        the time-bucketed up/down ring, cgroup→container-id. Each
+                        carries a header noting it's an extraction candidate.
 src/state.js            bind: decode → a registry of connections-over-time,
                         published as reactive snapshot signals
 src/controls.js         view state: sort / filter / search / collapse / focus
-src/components/         present: pure UI reading signals (root, toolbar, group,
-                        row, inspector, sparkline, searchbar, minibuffer, button)
+src/ui/                 a reusable TUI widget kit, app-independent (imports only
+                        yeet:*): theme (semantic color roles), tooltip (the hover
+                        status bus), button, minibuffer, pair, bsod
+src/components/         present: wssnoop UI reading signals (root, toolbar, group,
+                        container, row, inspector, sparkline, searchbar, agg, help)
 src/main.jsx            the seam: parse args, build the session, mount the view
 ```
 
 `probes/` is the only BPF/graph-aware code; `lib/decode.js` is pure data;
-`components/` see only signals. The same pipeline could drive a capture-to-disk
-or a test as easily as the TUI (see `test/lib.test.js`).
+`components/` see only signals. `src/ui/` and the kit-generic `lib/*` primitives
+depend on nothing wssnoop-specific — they're staged for extraction into shared
+yeet modules. The same pipeline could drive a capture-to-disk or a test as
+easily as the TUI (see `test/lib.test.js`).
 
 ## Build
 

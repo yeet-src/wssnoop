@@ -18,6 +18,7 @@
  */
 
 import { containerOf } from "../lib/cgroup.js";
+import { race } from "../lib/race.js";
 import { KNOWN_BINS, classify, libsslPath, nameMatches } from "./runtimes.js";
 
 export const DEFAULT_BIN = "libssl.so";
@@ -35,9 +36,6 @@ export const sslClass = (proc) => {
   const c = classify(proc);
   return c.tap === "libssl" ? "libssl" : c.decodable ? "runtime" : "opaque";
 };
-
-const timeout = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("graph timeout")), ms));
-const race = (p, ms) => Promise.race([p, timeout(ms)]);
 
 /* Lazy so importing this module off-isolate (a test that always injects a
  * graph) never touches the `yeet` global. */

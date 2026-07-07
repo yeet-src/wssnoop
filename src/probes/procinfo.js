@@ -12,14 +12,13 @@
 import { signal } from "yeet:tui";
 
 import { containerOf } from "../lib/cgroup.js";
+import { race } from "../lib/race.js";
 import { classify } from "./runtimes.js";
 
 const info = signal({}); // pid -> identity, republished as each resolves
 const seen = new Set(); // pids queried (resolved or in-flight) — query once each
 
 export const procInfo = info;
-
-const race = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("graph timeout")), ms))]);
 
 /* SSL tap class per pid (runtimes.classify → { label, tap, decodable }), a
  * separate lazy cache from identity: it needs the process's maps, the heavy
