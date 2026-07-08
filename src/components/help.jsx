@@ -11,7 +11,7 @@
 import { Box, Text, Layer, bold, fg, computed } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import Button from "../ui/button.jsx";
+import Button from "../kit/ui/button.jsx";
 import { COL } from "../palette.js";
 import { closeHelp } from "../controls.js";
 

@@ -10,10 +10,10 @@
 
 import { Box, Text, face, computed, signal } from "yeet:tui";
 
-import Button from "../ui/button.jsx";
+import Button from "../kit/ui/button.jsx";
 import Sparkline from "./sparkline.jsx";
 import Agg from "./agg.jsx";
-import { tip, hoverTip, hoverBg } from "../ui/tooltip.js";
+import { tip, hoverTip, hoverBg } from "../kit/ui/tooltip.js";
 import { COL } from "../palette.js";
 import { INDENT, W_ROLE, W_MSG, GAP, HANDLE, layout } from "./columns.js";
 import {

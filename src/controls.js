@@ -11,9 +11,9 @@
 
 import { signal, computed } from "yeet:tui";
 
-import { compile } from "./lib/query.js";
+import { compile } from "./kit/query.js";
 import { messageText } from "./lib/message.js";
-import { flash } from "./ui/tooltip.js";
+import { flash } from "./kit/ui/tooltip.js";
 
 const wrap = (arr, v, dir = 1) => {
   const i = arr.indexOf(v);

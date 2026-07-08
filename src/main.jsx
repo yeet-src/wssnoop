@@ -7,7 +7,7 @@
  *
  *   probes/probe.js  — capture: owns the BPF lifecycle, streams raw chunks up.
  *   lib/decode.js    — data:    chunks → HTTP upgrade → RFC-6455 frames.
- *   lib/timehist.js  — data:    a time-bucketed up/down byte ring per stream.
+ *   kit/timehist.js  — data:    a time-bucketed up/down byte ring per stream.
  *   state.js         — bind:    decode → a registry of connections-over-time,
  *                               published as reactive snapshot signals.
  *   controls.js      — view state: sort / filter / collapse / viz range / hover.
@@ -32,7 +32,7 @@
 import { mount } from "yeet:tui";
 
 import Root from "./components/root.jsx";
-import Bsod from "./ui/bsod.jsx";
+import Bsod from "./kit/ui/bsod.jsx";
 import { createSession } from "./state.js";
 import {
   isInspecting,

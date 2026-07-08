@@ -7,8 +7,8 @@
  * via tty) lives at the component edge. */
 
 import { DIR_WRITE } from "./decode.js";
-import { base64 } from "./bytes.js";
-import { parseJson } from "./json.js";
+import { base64 } from "../kit/bytes.js";
+import { parseJson } from "../kit/json.js";
 
 /* One retained message → a test-suite-friendly record. `dir` names the flow
  * from the traced process's view; `json`/`text` carry the decoded payload, or

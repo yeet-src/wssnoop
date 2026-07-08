@@ -6,17 +6,17 @@
  * modules under test are pure, so this needs no BPF, daemon, or UI.
  */
 
-import { createTimeHist, UP, DOWN } from "../src/lib/timehist.js";
+import { createTimeHist, UP, DOWN } from "../src/kit/timehist.js";
 import { createDecoder, parseFrame, DIR_READ, DIR_WRITE } from "../src/lib/decode.js";
 import { createRegistry } from "../src/state.js";
 import { messageRecord, toJsonl } from "../src/lib/export.js";
-import { base64 } from "../src/lib/bytes.js";
+import { base64 } from "../src/kit/bytes.js";
 import { recentBytes, connMetric } from "../src/lib/rank.js";
-import { rankMap } from "../src/lib/rankmap.js";
-import { fmtBytes, fmtAgo } from "../src/lib/fmt.js";
-import { jsonTokens } from "../src/lib/json.js";
-import { hexDump } from "../src/lib/hexdump.js";
-import { compile } from "../src/lib/query.js";
+import { rankMap } from "../src/kit/rankmap.js";
+import { fmtBytes, fmtAgo } from "../src/kit/fmt.js";
+import { jsonTokens } from "../src/kit/json.js";
+import { hexDump } from "../src/kit/hexdump.js";
+import { compile } from "../src/kit/query.js";
 import { messageText } from "../src/lib/message.js";
 import { resolveBin, discoverTargets, sslClass, DEFAULT_BIN, isExplicit } from "../src/probes/discover.js";
 import { classify, profileFor, KNOWN_BINS } from "../src/probes/runtimes.js";

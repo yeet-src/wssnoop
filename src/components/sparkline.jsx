@@ -18,7 +18,7 @@
 
 import { Box, CellBuffer, Effect, rgb } from "yeet:tui";
 
-import { fmtBytes, fmtAgo } from "../lib/fmt.js";
+import { fmtBytes, fmtAgo } from "../kit/fmt.js";
 import { heatFor } from "../palette.js";
 import {
   cursorFrac, cursorPinned, moveCursor, leaveCursor, toggleCursorPin,

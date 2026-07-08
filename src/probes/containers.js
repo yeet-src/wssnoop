@@ -11,7 +11,7 @@
 
 import { from } from "yeet:tui";
 
-import { race } from "../lib/race.js";
+import { race } from "../kit/race.js";
 
 /* Container summaries are small, but a wedged Docker socket shouldn't stall us
  * — race every poll against a short timeout (see README's graph caveat). */

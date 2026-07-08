@@ -1,10 +1,10 @@
 /* wssnoop/palette — the presentation palette. Solarized-ish tones, chosen to
  * read on both light and dark terminals. Shared across the UI components; the
  * data layers (lib/*, state.js) never see a color. The sparkline heat *ramps*
- * are built here too (from the generic factory in lib/heat.js): the ramp math is
+ * are built here too (from the generic factory in kit/heat.js): the ramp math is
  * generic, but the hue choices are a palette decision, so they belong here. */
-import { heatPalette } from "./lib/heat.js";
-import { applyTheme } from "./ui/theme.js";
+import { heatPalette } from "./kit/heat.js";
+import { applyTheme } from "./kit/ui/theme.js";
 
 export const COL = {
   /* surface — explicit so the dashboard never shows through to the terminal
@@ -73,7 +73,7 @@ export const roleColor = (role) =>
 /* Sparkline heat variants — one hue pair per table layer, so the connection
  * rows, the per-process aggregate, and the global bar read distinct at a glance
  * (warm = egress/up, cool = ingress/down within each; distinct families across).
- * The ramp machinery is generic (lib/heat.js); these are the wssnoop choices. */
+ * The ramp machinery is generic (kit/heat.js); these are the wssnoop choices. */
 const HUES = {
   conn: { up: 0xf5a623, down: 0x1fb6a6 }, // amber / teal
   agg: { up: 0xb36ae2, down: 0x5b6cf0 }, // violet / indigo

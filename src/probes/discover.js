@@ -17,8 +17,8 @@
  *   - anything unresolved            → "libssl.so", the dynamic-linking default.
  */
 
-import { containerOf } from "../lib/cgroup.js";
-import { race } from "../lib/race.js";
+import { containerOf } from "../kit/cgroup.js";
+import { race } from "../kit/race.js";
 import { KNOWN_BINS, classify, libsslPath, nameMatches } from "./runtimes.js";
 
 export const DEFAULT_BIN = "libssl.so";

@@ -11,19 +11,19 @@
 
 import { Box, Text, face, computed } from "yeet:tui";
 
-import Button from "../ui/button.jsx";
+import Button from "../kit/ui/button.jsx";
 import Row from "./row.jsx";
 import Sparkline from "./sparkline.jsx";
 import Agg from "./agg.jsx";
 import { COL } from "../palette.js";
-import { tip } from "../ui/tooltip.js";
+import { tip } from "../kit/ui/tooltip.js";
 import { GAP, HANDLE, INDENT } from "./columns.js";
 import {
   collapseFor, cycleGroup, COLLAPSE_STEPS, COLLAPSE_LABELS,
   sortKey, filters,
 } from "../controls.js";
 import { connMetric, recentBytes } from "../lib/rank.js";
-import { rankMap } from "../lib/rankmap.js";
+import { rankMap } from "../kit/rankmap.js";
 import { procInfo, resolve } from "../probes/procinfo.js";
 import { resolvePeers } from "../probes/peers.js";
 

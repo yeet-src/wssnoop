@@ -23,7 +23,7 @@
 
 import { computed, signal } from "yeet:tui";
 
-import { race } from "../lib/race.js";
+import { race } from "../kit/race.js";
 import { connections } from "./netconn.js";
 
 const info = signal({}); // pid -> { endpoints }

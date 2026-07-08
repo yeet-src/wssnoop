@@ -20,16 +20,16 @@
 import { Box, Text, Layer, bold, italic, fg, computed } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
-import Button from "../ui/button.jsx";
-import Pair from "../ui/pair.jsx";
-import { tip, flash, hoverTip, hoverBg } from "../ui/tooltip.js";
+import Button from "../kit/ui/button.jsx";
+import Pair from "../kit/ui/pair.jsx";
+import { tip, flash, hoverTip, hoverBg } from "../kit/ui/tooltip.js";
 import { COL, roleColor, jsonColor } from "../palette.js";
-import { fmtBytes, fmtAgo } from "../lib/fmt.js";
-import { hexDump } from "../lib/hexdump.js";
-import { jsonTokens, parseJson } from "../lib/json.js";
-import { utf8Bytes } from "../lib/bytes.js";
+import { fmtBytes, fmtAgo } from "../kit/fmt.js";
+import { hexDump } from "../kit/hexdump.js";
+import { jsonTokens, parseJson } from "../kit/json.js";
+import { utf8Bytes } from "../kit/bytes.js";
 import { toJsonl, messageJson } from "../lib/export.js";
-import { compile } from "../lib/query.js";
+import { compile } from "../kit/query.js";
 import { messageText } from "../lib/message.js";
 import { DIR_WRITE } from "../lib/decode.js";
 import { destOf, destTip, peerInfo } from "../probes/peers.js";
@@ -54,7 +54,7 @@ import {
 
 /* The compiled query predicate, recompiled only when the query changes. Plain
  * text is a substring over the message haystack (opcode + text + inflate error);
- * `$.path OP value` terms test the decoded JSON body (see lib/query.js). */
+ * `$.path OP value` terms test the decoded JSON body (see kit/query.js). */
 const matcher = computed(() => compile(search.get(), { text: messageText }));
 
 /* OSC52 clipboard (works across the VM / SSH); no-op if unavailable. */

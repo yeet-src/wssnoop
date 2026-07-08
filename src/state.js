@@ -33,7 +33,7 @@
 
 import { computed, from, signal } from "yeet:tui";
 
-import { createTimeHist, DOWN, UP } from "./lib/timehist.js";
+import { createTimeHist, DOWN, UP } from "./kit/timehist.js";
 import { createDecoder, DIR_WRITE, TRANSPORT_TCP } from "./lib/decode.js";
 import { snoop } from "./probes/probe.js";
 import { subscribeFrames, armPlaintext, disarmPlaintext } from "./probes/netconn.js";

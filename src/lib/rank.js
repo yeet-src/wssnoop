@@ -1,7 +1,7 @@
 /* rank — the wssnoop table's ordering *metrics*: how much a connection or group
  * "weighs" under each sort key, one pure place so the group order (root) and the
  * connection order within a group (group.jsx) agree. The generic ranking itself
- * — items → rank map, descending by metric — is `rankMap` (lib/rankmap.js); this
+ * — items → rank map, descending by metric — is `rankMap` (kit/rankmap.js); this
  * file supplies the domain metrics it ranks by.
  *
  * A clock tick under the "recent" key re-ranks and just re-flows the layout

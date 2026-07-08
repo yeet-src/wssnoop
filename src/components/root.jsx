@@ -17,7 +17,7 @@ import Container from "./container.jsx";
 import Inspector from "./inspector.jsx";
 import Browser from "./browser.jsx";
 import Help from "./help.jsx";
-import Minibuffer from "../ui/minibuffer.jsx";
+import Minibuffer from "../kit/ui/minibuffer.jsx";
 import SearchBar from "./searchbar.jsx";
 import { COL } from "../palette.js";
 import { layout, START, DEST_MIN } from "./columns.js";
@@ -30,8 +30,8 @@ import {
 const HINT =
   "click a connection → inspect · decode · ⊙ focus the kernel · ⧉ copy fixtures    ·    / search · q quit";
 import { groupMetric } from "../lib/rank.js";
-import { rankMap } from "../lib/rankmap.js";
-import { mergeHists } from "../lib/timehist.js";
+import { rankMap } from "../kit/rankmap.js";
+import { mergeHists } from "../kit/timehist.js";
 import { procInfo } from "../probes/procinfo.js";
 import { containers } from "../probes/containers.js";
 
