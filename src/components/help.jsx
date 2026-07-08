@@ -12,6 +12,7 @@ import { Box, Text, Layer, bold, fg, computed } from "yeet:tui";
 import { pipe } from "yeet:helpers";
 
 import Button from "../kit/ui/button.jsx";
+import { tip } from "../kit/ui/tooltip.js";
 import { COL } from "../palette.js";
 import { closeHelp } from "../controls.js";
 
@@ -93,7 +94,7 @@ export default function Help({ size }) {
         onClick={(e) => e.stopPropagation()}
       >
         <Box direction="row" height={1}>
-          <Button title="close help (Esc)" onClick={closeHelp}>‹ close</Button>
+          <Button {...tip("close help (Esc)")} onClick={closeHelp}>‹ close</Button>
           <Box width={2} break="none" />
           <Text break="none">{pipe("wssnoop · help", fg(COL.title), bold)}</Text>
         </Box>

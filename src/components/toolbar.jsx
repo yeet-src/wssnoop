@@ -105,33 +105,33 @@ export default function Toolbar({ groups, global, stats, status, now, span, size
             the tail); fit packs it to its true width and the spacer takes the slack. */}
         <Box width="fit" direction="row" gap={1} bg={COL.bg} break="none">
           <Button
-            title={titles.search}
+            {...tip(titles.search)}
             onClick={startSearch}
-            active={() => searchActive.get() || !!search.get()}
+            selected={() => searchActive.get() || !!search.get()}
           >
             {() => (search.get() ? `⌕ ${search.get()}` : "⌕ search")}
           </Button>
-          <Button title={titles.sort} onClick={cycleSort}>
+          <Button {...tip(titles.sort)} onClick={cycleSort}>
             {() => `sort:${SORT_LABELS[sortKey.get()]}`}
           </Button>
-          <Button title={titles.role} onClick={cycleRole}>
+          <Button {...tip(titles.role)} onClick={cycleRole}>
             {() => `role:${filters.get().role}`}
           </Button>
-          <Button title={titles.active} onClick={toggleActive} active={() => filters.get().activeOnly}>
+          <Button {...tip(titles.active)} onClick={toggleActive} selected={() => filters.get().activeOnly}>
             {() => `idle:${filters.get().activeOnly ? "hidden" : "shown"}`}
           </Button>
-          <Button title={titles.rows} onClick={cycleAll}>
+          <Button {...tip(titles.rows)} onClick={cycleAll}>
             {() => `rows:${COLLAPSE_LABELS[collapse.get().global]}`}
           </Button>
-          <Button title={titles.agg} onClick={cycleAgg}>
+          <Button {...tip(titles.agg)} onClick={cycleAgg}>
             {() => `agg:${AGG_LABELS[aggMetric.get()]}`}
           </Button>
-          <Button title={titles.vizDown} onClick={() => cycleViz(-1)}>‹</Button>
+          <Button {...tip(titles.vizDown)} onClick={() => cycleViz(-1)}>‹</Button>
           <Text break="none">
             {() => [face({ fg: COL.dim })("win "), face({ fg: COL.accent })(RANGE_LABELS[vizRange.get()])]}
           </Text>
-          <Button title={titles.vizUp} onClick={() => cycleViz(1)}>›</Button>
-          <Button title="help (?) · what everything means and the keys" onClick={toggleHelp}>?</Button>
+          <Button {...tip(titles.vizUp)} onClick={() => cycleViz(1)}>›</Button>
+          <Button {...tip("help (?) · what everything means and the keys")} onClick={toggleHelp}>?</Button>
         </Box>
       </Box>
 

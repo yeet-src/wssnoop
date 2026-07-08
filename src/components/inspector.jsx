@@ -358,7 +358,7 @@ export default function Inspector({ groups, now, size }) {
       >
         {/* title row */}
         <Box direction="row" height={1} break="none">
-          <Button title="back to the connection list (Esc)" onClick={closeInspector}>
+          <Button {...tip("back to the connection list (Esc)")} onClick={closeInspector}>
             ‹ back
           </Button>
           <Text break="none">{" "}</Text>
@@ -375,27 +375,27 @@ export default function Inspector({ groups, now, size }) {
           </Text>
           <Box width="1fr" height={1} />
           <Button
-            title={() =>
+            {...tip(() =>
               isFocused(selected.get())
                 ? "⊙ focused · capture pinned to this connection in the kernel; click to release all connections"
                 : "⊙ focus eBPF capture on just this connection · every other one goes silent in the kernel (near-zero overhead). A live user→kernel write."
-            }
+            )}
             onClick={() => {
               const k = selected.get();
               isFocused(k) ? clearFocus() : setFocus(k);
             }}
-            active={() => isFocused(selected.get())}
+            selected={() => isFocused(selected.get())}
           >
             {() => (isFocused(selected.get()) ? "⊙ focused" : "⊙ focus")}
           </Button>
           <Button
-            title={() =>
+            {...tip(() =>
               frozen.get()
                 ? "❚❚ paused · reading history; click to resume following newest first"
                 : "● live · following newest first; click to pause (scrolling or expanding also pauses)"
-            }
+            )}
             onClick={togglePause}
-            active={() => frozen.get()}
+            selected={() => frozen.get()}
           >
             {() => (frozen.get() ? "❚❚ paused" : "● live")}
           </Button>
@@ -504,14 +504,14 @@ export default function Inspector({ groups, now, size }) {
         {/* actions: capture-out (test fixtures) + discoverability toggles */}
         <Box direction="row" height={1} gap={1}>
           <Button
-            title="copy all shown messages as JSON Lines → clipboard (drop straight into a test fixture)"
+            {...tip("copy all shown messages as JSON Lines → clipboard (drop straight into a test fixture)")}
             onClick={copyAll}
           >
             ⧉ copy all
           </Button>
           {() =>
             expanded.get() != null ? (
-              <Button title="copy this message as JSON → clipboard" onClick={() => copyOne(expanded.get())}>
+              <Button {...tip("copy this message as JSON → clipboard")} onClick={() => copyOne(expanded.get())}>
                 ⧉ copy msg
               </Button>
             ) : null
@@ -519,13 +519,13 @@ export default function Inspector({ groups, now, size }) {
           {() =>
             expanded.get() != null ? (
               <Button
-                title={() =>
+                {...tip(() =>
                   raw.get()
                     ? "⌗ showing raw bytes (hex) · click for the decoded view"
                     : "⌗ showing the decoded view · click for raw bytes (hex)"
-                }
+                )}
                 onClick={toggleRaw}
-                active={() => raw.get()}
+                selected={() => raw.get()}
               >
                 {() => (raw.get() ? "⌗ raw" : "⌗ decoded")}
               </Button>
@@ -533,13 +533,13 @@ export default function Inspector({ groups, now, size }) {
           }
           <Box width="1fr" height={1} />
           <Button
-            title={() =>
+            {...tip(() =>
               details.get()
                 ? "⊖ hide the full connection metadata"
                 : "⊕ show the full connection metadata (subprotocol, extensions, origin, opcode histogram, close)"
-            }
+            )}
             onClick={toggleDetails}
-            active={() => details.get()}
+            selected={() => details.get()}
           >
             {() => (details.get() ? "⊖ details" : "⊕ details")}
           </Button>

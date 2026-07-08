@@ -38,7 +38,7 @@ Pure primitives (no signals, no I/O):
 |---|---|
 | `theme.js` | semantic color *roles* (accent/ink/dim/hover/header/crash) + `applyTheme`; widgets reference a role, the app supplies the value |
 | `tooltip.js` | the hover status bus: `hoverTitle`, the shared highlight key, `toast`/`flash`, and the `tip`/`hoverTip`/`hoverBg` spreads |
-| `button.jsx` | a padded, hover/active-styled clickable that feeds the tooltip bus |
+| `button.jsx` | a padded clickable with built-in idle/hover/pressed styling + a controlled `selected` overlay; tone and all box props forward/override |
 | `minibuffer.jsx` | a one-line status strip echoing the bus; app content is props (`hint`, `priority`) |
 | `pair.jsx` | a two-sided stat (up/down) sharing one tooltip |
 | `bsod.jsx` | a last-resort error screen; the app names it via `title` |

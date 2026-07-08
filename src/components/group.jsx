@@ -81,11 +81,11 @@ export default function Group({ group, conns, now, span, geom, order, depth = 0,
           {/* Stateful toggle: the glyph shows the current rows mode, and its
               tooltip names that mode and what the next click does. */}
           <Button
-            title={() => {
+            {...tip(() => {
               const cur = collapseFor(pid);
               const lbl = procInfo.get()[pid]?.label ?? `pid ${pid}`;
               return `rows for ${lbl} · now ${COLLAPSE_LABELS[cur]}; click for ${COLLAPSE_LABELS[nextCollapse(cur)]}`;
-            }}
+            })}
             onClick={() => cycleGroup(pid)}
           >
             {() => glyph(collapseFor(pid))}

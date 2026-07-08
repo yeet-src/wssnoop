@@ -51,9 +51,9 @@ export default function Container({ cid, name, image, members, hist, now, span, 
       <Box direction="row" height={1} order={-1} {...tip(headerTip)}>
         <Box width={geom.left} direction="row" gap={GAP} break="none">
           <Button
-            title={() =>
+            {...tip(() =>
               `processes in ${label} — now ${COLLAPSE_LABELS[collapseFor(ckey)] ?? "expanded"}; click to ${collapseFor(ckey) === 0 ? "expand" : "collapse"}`
-            }
+            )}
             onClick={() => cycleGroup(ckey)}
           >
             {() => glyph(collapseFor(ckey))}

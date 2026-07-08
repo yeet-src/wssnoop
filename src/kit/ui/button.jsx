@@ -1,60 +1,74 @@
-/* wssnoop/button — the one interactive primitive. A small padded box that
- * publishes its `title` to the shared `hoverTitle` signal on pointer-enter (the
- * minibuffer renders it) and clears it on leave; clicking runs `onClick` and
- * stops the event so it never trips a handler on the pane behind it. `active`
- * marks toggle / selected state (accent fill), hover lights the faint hover role.
+/* button — a padded, clickable label with built-in pointer styling. Three
+ * visual tiers driven by the pointer (idle / hover / pressed, the CSS :active
+ * sense) plus an orthogonal caller-driven `selected` overlay for a toggle that
+ * is currently on. A stateful switch that *remembers* its own on/off is a
+ * different widget; `selected` here is controlled — the caller owns the state.
  *
- * The button knows nothing of the minibuffer — the tooltip is global state by
- * design (see tooltip.js), so the toolbar and the hint share one source. Hover
- * is a local boolean: it persists because the buttons mount once (the inspector
- * is memoized in root, so its subtree no longer re-mints each heartbeat).
+ * Framework-generic: no theme, no tooltip bus. Colors come from a `tone` prop
+ * (sensible defaults built in), and everything else — `onClick`, a `{...tip()}`
+ * tooltip spread, sizing, a `bg` override — forwards straight to the Box. The
+ * framework composes same-event handlers, so a forwarded `onMouseEnter` and the
+ * internal hover tracking coexist rather than clobber.
  */
 
-import { Box, Text, face, signal, computed } from "yeet:tui";
+import { Box, Text, signal, computed, toSignal } from "yeet:tui";
 
-import { hoverTitle } from "./tooltip.js";
-import { theme } from "./theme.js";
+/* Neutral solarized-ish defaults so the button renders standalone; an app
+ * passes `tone` to reskin. `ink` is the text on an accent fill. */
+const TONE = { accent: "#b58900", ink: "#fdf6e3", dim: "#93a1a1", hover: "#1b2433" };
 
-/* Children and `active` may be plain or thunks — the toolbar's labels and
- * toggle state are live, so we resolve both reactively. `label` reads its thunk
- * inside both the width and the content thunks so the box re-sizes in step.
- * `title` is passed to `hoverTitle` unresolved (string or thunk) so a
- * state-naming tooltip stays live while hovered — the minibuffer resolves it. */
-const asText = (c) => (Array.isArray(c) ? c.join("") : `${c ?? ""}`);
+/* Pressed and selected both read as an accent fill (pressed is transient, so it
+ * flashes as click feedback); hover lifts the faint highlight; idle is bare. */
+const bgFor = (t, sel, hov, prs) => (prs || sel ? t.accent : hov ? t.hover : undefined);
+const inkFor = (t, sel, hov, prs) =>
+  prs || sel ? { fg: t.ink, bold: true } : hov ? { fg: t.accent, bold: true } : { fg: t.dim, bold: false };
 
-/* Separate the two concerns: the Box owns the background (so it fills the
- * padding too), the Text owns the ink. Background: active fills accent, a plain
- * hover lights the faint highlight (the same hover role the clickable rows use,
- * so buttons and rows read consistently), idle is transparent. Ink: explicit fg
- * on idle — a bare `dim` attr vanishes on the dark surface. */
-const bgFor = (active, hovered) => (active ? theme.accent : hovered ? theme.hover : undefined);
-const inkFor = (active, hovered) =>
-  active ? { fg: theme.ink, bold: true } : hovered ? { fg: theme.accent, bold: true } : { fg: theme.dim };
+/* Mirror internal pointer state to a caller's optional setter (fn or Signal),
+ * so a parent can observe hover / pressed while the button styles itself. */
+const push = (sig, fwd) => (v) => {
+  sig.set(v);
+  if (typeof fwd === "function") fwd(v);
+  else fwd?.set?.(v);
+};
 
-export default function Button({ title = "", onClick, active = false }, children) {
+export default function Button(opts, ...kids) {
+  const { selected = false, tone = TONE, setHover, setPressed, ...rest } = opts;
   const hovered = signal(false);
-  const labelOf = typeof children === "function" ? () => asText(children()) : () => asText(children);
-  const activeOf = typeof active === "function" ? active : () => active;
-  /* A computed (not a bare thunk) so the Box repaints its fill on hover/active
-   * without re-minting — same reactive-bg pattern the clickable rows use. */
-  const bg = computed(() => bgFor(activeOf(), hovered.get()));
+  const pressed = signal(false);
+  const sel = toSignal(selected);
+  const dropPress = push(pressed, setPressed);
+
+  /* Computed signals, not thunks: `bg`'s value slot takes a Signal (a bare
+   * function there is a per-cell shader, not a reactive read). */
+  const bg = computed(() => bgFor(tone, sel.get(), hovered.get(), pressed.get()));
+  const ink = computed(() => inkFor(tone, sel.get(), hovered.get(), pressed.get()));
   return (
     <Box
-      width={() => labelOf().length + 2} /* padding [0,1] on each side */
+      width="fit"
       padding={[0, 1]}
       height={1}
       bg={bg}
-      onMouseEnter={() => hoverTitle.set(title)}
-      onMouseLeave={() => hoverTitle.set("")}
-      onClick={(e) => {
-        onClick?.();
-        e.stopPropagation();
+      setHover={push(hovered, setHover)}
+      // defaults above are overridable by `rest`; the press handlers below
+      // re-invoke `rest`'s so they compose (pressed has no declarative setter
+      // like setHover, so the widget tracks it by hand).
+      {...rest}
+      onMouseDown={(e) => {
+        rest.onMouseDown?.(e);
+        dropPress(true);
       }}
-      setHover={hovered}
+      onMouseUp={(e) => {
+        rest.onMouseUp?.(e);
+        dropPress(false);
+      }}
+      onMouseLeave={(e) => {
+        rest.onMouseLeave?.(e);
+        dropPress(false);
+      }}
     >
-      {/* face() applies a runtime-computed patch — the blessed escape hatch for
-          dynamic styling, read inside the thunk so it tracks active/hover. */}
-      <Text break="none">{() => face(inkFor(activeOf(), hovered.get()))(labelOf())}</Text>
+      <Text break="none" fg={() => ink.get().fg} bold={() => ink.get().bold}>
+        {kids}
+      </Text>
     </Box>
   );
 }
