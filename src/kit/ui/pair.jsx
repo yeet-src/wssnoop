@@ -17,23 +17,23 @@ import { theme } from "./theme.js";
 /* The shared tooltip: `desc` names the stat, then each side's label, with the
  * hovered side in its own color + bold and the other dimmed. */
 const tipFor = (desc, up, down, hotUp) => [
-  fg(theme.dim)(`${desc} · `),
-  hotUp ? pipe(up.label, fg(up.color), bold) : fg(theme.dim)(up.label),
-  fg(theme.dim)(" · "),
-  hotUp ? fg(theme.dim)(down.label) : pipe(down.label, fg(down.color), bold),
+  pipe(`${desc} · `, fg(theme.dim)),
+  hotUp ? pipe(up.label, fg(up.color), bold) : pipe(up.label, fg(theme.dim)),
+  pipe(" · ", fg(theme.dim)),
+  hotUp ? pipe(down.label, fg(theme.dim)) : pipe(down.label, fg(down.color), bold),
 ];
 
 /* `text` is a thunk (figures climb live). The figure renders plainly in its
  * color; the focus cue lives in the tooltip, not here. */
 const Side = ({ color, text, title }) => (
   <Box direction="row" width="fit" height={1} break="none" {...tip(title)}>
-    <Text break="none">{() => fg(color)(text())}</Text>
+    <Text break="none">{() => pipe(text(), fg(color))}</Text>
   </Box>
 );
 
-export default function Pair({ desc, lead, sep, up, down }) {
+export default function Pair({ desc, lead, sep, up, down, ...rest }) {
   return (
-    <Box direction="row" width="fit" height={1} break="none">
+    <Box direction="row" width="fit" height={1} break="none" {...rest}>
       {lead != null ? <Text break="none">{lead}</Text> : null}
       <Side color={up.color} text={up.text} title={() => tipFor(desc, up, down, true)} />
       <Text break="none">{sep}</Text>

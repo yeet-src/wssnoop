@@ -10,14 +10,14 @@ import { pipe } from "yeet:helpers";
 
 import { theme } from "./theme.js";
 
-export default function Bsod({ error, title = ":(  hit an error" }) {
+export default function Bsod({ error, title = ":(  hit an error", ...rest }) {
   const lines = String(error?.stack ?? error?.message ?? error).split("\n");
   return (
-    <Box bg={theme.crash} width="1fr" height="1fr" padding={2} direction="column">
+    <Box bg={theme.crash} width="1fr" height="1fr" padding={2} direction="column" {...rest}>
       <Text break="none">{pipe(title, fg(theme.ink), bold)}</Text>
       <Text break="none">{" "}</Text>
       {lines.slice(0, 30).map((l) => (
-        <Text break="anywhere">{fg(theme.ink)(l || " ")}</Text>
+        <Text break="anywhere" fg={theme.ink}>{l || " "}</Text>
       ))}
       <Text break="none">{" "}</Text>
       <Text break="none">{pipe("press q to quit", fg(theme.dim), italic)}</Text>

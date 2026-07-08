@@ -9,22 +9,23 @@
  * toast > priority > hoverTitle > hint. */
 
 import { Box, Text, face } from "yeet:tui";
+import { pipe } from "yeet:helpers";
 
 import { hoverTitle, toast } from "./tooltip.js";
 import { theme } from "./theme.js";
 
 const read = (src) => (src == null ? null : typeof src.get === "function" ? src.get() : src());
 
-export default function Minibuffer({ hint = "", priority }) {
+export default function Minibuffer({ hint = "", priority, ...rest }) {
   return (
-    <Box height={1} overflow="hidden">
+    <Box height={1} overflow="hidden" {...rest}>
       <Text break="none">
         {() => {
           const flash = toast.get();
-          if (flash) return face({ fg: theme.accent })(flash);
+          if (flash) return pipe(flash, face({ fg: theme.accent }));
           const t = read(priority) ?? hoverTitle.get();
           const text = typeof t === "function" ? t() : t; // titles are stored unresolved
-          return text ? face({ fg: theme.dim })(text) : face({ fg: theme.header, italic: true })(hint);
+          return text ? pipe(text, face({ fg: theme.dim })) : pipe(hint, face({ fg: theme.header, italic: true }));
         }}
       </Text>
     </Box>
