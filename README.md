@@ -192,7 +192,7 @@ wssnoop attaches whichever plaintext boundaries a process offers, best-effort:
 |---|---|
 | OpenSSL (Node, Python, Ruby, Rust native-tls, C/C++ …) | `SSL_read`/`SSL_write` **and** `SSL_read_ex`/`SSL_write_ex` (CPython uses the `_ex` pair) — in a mapped `libssl` or baked static into the exe |
 | Go (gorilla, net/http, anything on the stdlib) | `crypto/tls.(*Conn).Read`/`Write` (register ABI; reads goroutine-id-keyed) |
-| rustls (tokio-tungstenite, any pure-Rust TLS) | `ConnectionCommon::…PlaintextSink::write` + `CommonState::take_received_plaintext`, resolved by `symbol_prefix` (the mangled hash varies per build) |
+| rustls (tokio-tungstenite, any pure-Rust TLS) | `ConnectionCommon::…PlaintextSink::write` + `CommonState::take_received_plaintext`, resolved from the demangled name via `yeet:sym` (the mangled hash varies per build) |
 
 A process on a stack with none of these (a stripped static build, or a TLS lib
 we don't hook) shows up but decodes to nothing — it's marked **opaque** rather
@@ -207,8 +207,8 @@ What survives depends on the strip level, and it differs by runtime:
   linked Rust native-tls / C++ keep decoding no matter how the *app* is built.
 - **Go, rustls, static-OpenSSL** put their symbols in `.symtab`, which a **full
   strip removes** (`strip`, cargo `strip = true`, `go build -ldflags="-s -w"`) —
-  then the name/prefix attach can't resolve them. Not stripped → symbols are
-  just *mangled*, which the exact/`symbol_prefix` matching handles.
+  then the name/demangled-match attach can't resolve them. Not stripped →
+  symbols are just *mangled*, which the exact / demangled-name matching handles.
 - **For rustls, use `strip = "debuginfo"`** (not `strip = true`) in
   `[profile.release]`: it drops DWARF (most of the size) but **keeps `.symtab`**,
   so hooks still resolve. Same idea for C++: keep the symbol table, or ship a

@@ -1,30 +1,35 @@
-/* Integration test — rustls plaintext capture (tokio-tungstenite). Attaches
- * rustprobe.bpf.o to a running rustls binary by `symbol_prefix` (the daemon
- * resolves the per-build codegen hash) and asserts we capture plaintext both
- * directions. yeet:bpf only, no decode.js / yeet:compression.
+/* Integration test — rustls plaintext capture (tokio-tungstenite). Resolves
+ * the per-build-hashed boundary symbols from their demangled names via
+ * yeet:sym, attaches rustprobe.bpf.o to a running rustls binary, and asserts we
+ * capture plaintext both directions. yeet:bpf + yeet:sym only, no decode.js /
+ * yeet:compression.
  *
  *   yeet run test/it-rustls.js -- --pid <pid> --bin /tmp/rust-worker
  *
- * Validates the full dynamic path: symbol_prefix resolves, egress
+ * Validates the full dynamic path: the write/read symbols resolve, egress
  * (PlaintextSink::write, buf ptr=X1/len=X2 at entry) and ingress
  * (take_received_plaintext, the decrypted bytes behind X1) are both hookable
- * and fold into one connection id. Prefixes match probe.js. */
+ * and fold into one connection id. The queries match probe.js. */
 import { BpfObject, RingBuf } from "yeet:bpf";
+import { Inspector } from "yeet:sym";
 
 const pid = Number(yeet.args.pid);
 const bin = yeet.args.bin || "/tmp/rust-worker";
 const TIMEOUT_MS = 25000;
 
-const WRITE_PREFIX =
-  "_ZN99_$LT$rustls..conn..ConnectionCommon$LT$T$GT$$u20$as$u20$rustls..conn..connection..PlaintextSink$GT$5write17h";
-const READ_PREFIX = "_ZN6rustls12common_state11CommonState23take_received_plaintext17h";
+const WRITE_RE = /PlaintextSink>::write$/;
+const READ_RE = /CommonState>?::take_received_plaintext$/;
 
 const up = { kind: "uprobe", binary: bin, pid };
+const insp = await Inspector.open(bin);
+const writeSym = await insp.mangle(WRITE_RE);
+const readSym = await insp.mangle(READ_RE);
+await insp.close();
 const ctl = await new BpfObject({ exe: "../bin/rustprobe.bpf.o", base: import.meta.dirname })
   .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
   .bind("focus", { kind: "array" })
-  .attach("probe_rust_tls_write", { ...up, symbol_prefix: WRITE_PREFIX })
-  .attach("probe_rust_tls_read", { ...up, symbol_prefix: READ_PREFIX })
+  .attach("probe_rust_tls_write", { ...up, symbol: writeSym })
+  .attach("probe_rust_tls_read", { ...up, symbol: readSym })
   .start();
 
 console.log(`attached rustls write+read on ${bin} pid ${pid}`);

@@ -5,6 +5,7 @@
  * lib/decode.js's job. */
 
 import { BpfObject, RingBuf, ArrayMap } from "yeet:bpf";
+import { Inspector } from "yeet:sym";
 
 import { resolveBin } from "./discover.js";
 
@@ -66,23 +67,20 @@ const GO = {
   ],
 };
 
-/* rustls (tokio-tungstenite, any pure-Rust TLS). Its boundary symbols are
- * mangled with a per-build codegen hash the isolate can't know, so we attach by
- * `symbol_prefix`: the daemon resolves the single .symtab/.dynsym symbol
- * starting with the stable prefix (the part before the `17h<hash>E` suffix) and
- * errors if none/several match. So this needs no per-binary config — a
- * non-rustls target simply has no such symbol and the attach is skipped. The
- * prefixes are legacy-mangling specific (rustc's `_ZN…`); a v0-mangled build
- * would need the `_R…` forms. Egress `…PlaintextSink$GT$5write17h` stops at
- * `5write` so it can't also match `14write_vectored`. */
-const RUST_WRITE_PREFIX =
-  "_ZN99_$LT$rustls..conn..ConnectionCommon$LT$T$GT$$u20$as$u20$rustls..conn..connection..PlaintextSink$GT$5write17h";
-const RUST_READ_PREFIX = "_ZN6rustls12common_state11CommonState23take_received_plaintext17h";
+/* rustls (tokio-tungstenite, any pure-Rust TLS). Its boundary symbols carry a
+ * per-build codegen hash (`…17h<hash>E`) the isolate can't know, so a RegExp
+ * probe target resolves against the target's ELF symbol table via yeet:sym
+ * rather than naming an exact symbol. Matching the demangled name is
+ * mangling-scheme agnostic (legacy `_ZN…` and v0 `_R…` builds both work) and
+ * needs no per-binary config: a non-rustls target has no such symbol, the
+ * resolve throws, and the attach is skipped. `>::write$` is anchored so it
+ * can't also match `write_vectored`; the read's `>?` tolerates both renderings
+ * of an inherent method — legacy `CommonState::` and v0 `<…CommonState>::`. */
 const RUST = {
   file: "rustprobe.bpf.o",
   probes: [
-    ["probe_rust_tls_write", { symbol_prefix: RUST_WRITE_PREFIX }],
-    ["probe_rust_tls_read", { symbol_prefix: RUST_READ_PREFIX }],
+    ["probe_rust_tls_write", /PlaintextSink>::write$/],
+    ["probe_rust_tls_read", /CommonState>?::take_received_plaintext$/],
   ],
 };
 
@@ -96,6 +94,16 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
   // to tell entry (SEC("uprobe")) from return (SEC("uretprobe")).
   const uprobe = { kind: "uprobe", binary: target, pid };
 
+  /* Resolve a RegExp probe target to its exact mangled symbol against the
+   * target's ELF symbol table. Opened lazily (only if a probe needs it) and
+   * closed once every tap has attached — resolution is an attach-time concern,
+   * not a runtime one. Throws NotFound/Ambiguous, which skips that tap. */
+  let insp = null;
+  const symbolFor = async (re) => {
+    insp ??= await Inspector.open(target);
+    return insp.mangle(re);
+  };
+
   /* Load one tap object, attach its uprobes, and wire its ringbuf → onEvent and
    * its live focus filter. Throws if a symbol can't be attached (the caller
    * decides whether that's fatal or best-effort). */
@@ -103,11 +111,11 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
     let obj = new BpfObject({ exe: `${BIN_DIR}/${file}`, base: import.meta.dirname })
       .bind("events", { kind: "ringbuf", btf_struct: "ssl_event" })
       .bind("focus", { kind: "array" }); // writable filter (slot 0 ssl, 1 pid)
-    // A probe's target is either an exact symbol (string) or attach options
-    // (e.g. { symbol_prefix }) merged into the uprobe spec.
-    for (const [prog, target] of probes) {
-      const opts = typeof target === "string" ? { symbol: target } : target;
-      obj = obj.attach(prog, { ...uprobe, ...opts });
+    // A probe's symbol is either an exact name (string) or a RegExp resolved
+    // against the target's symbol table (a per-build hash rules out a literal).
+    for (const [prog, spec] of probes) {
+      const symbol = spec instanceof RegExp ? await symbolFor(spec) : spec;
+      obj = obj.attach(prog, { ...uprobe, symbol });
     }
     const control = await obj.start();
 
@@ -156,6 +164,7 @@ export async function snoop({ bin, pid, onEvent, onError, onBin }) {
       /* this boundary's symbols aren't in the target — try the next */
     }
   }
+  if (insp) await insp.close().catch(() => {});
   if (taps.length === 0) throw new Error("no tappable TLS boundary");
 
   return {
