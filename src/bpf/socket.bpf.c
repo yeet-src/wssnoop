@@ -15,9 +15,10 @@
  *      pays nothing to userspace. This sees only what's plaintext on the wire —
  *      an in-process TLS client's bytes are ciphertext here (use the SSL tap).
  *
- * NB the sendmsg/recvmsg kprobes read msghdr/iov, which is kernel-version
- * sensitive; treat plaintext capture as best-effort until it moves to a
- * BTF-stable hook (fentry) or a wire tap (tcx). Discovery uses fexit already. */
+ * NB the sendmsg/recvmsg kprobes read msghdr/iov, whose layout moves between
+ * kernels — CO-RE absorbs that (see iter_base), but treat plaintext capture as
+ * best-effort until it moves to a BTF-stable hook (fentry) or a wire tap (tcx).
+ * Discovery uses fexit already. */
 
 #define BPF_NO_KFUNC_PROTOTYPES
 
@@ -147,23 +148,42 @@ static __always_inline void emit_frame(__u64 sk, __u64 buf, __u32 len, __u8 dir)
     bpf_ringbuf_submit(e, 0);
 }
 
+/* struct iov_iter was reshaped in 6.4: the iovec pointer was renamed `iov` →
+ * `__iov`, it swapped places with `count`, and enum iter_type was renumbered so
+ * ITER_UBUF sits first. So every read here goes through CO-RE and resolves
+ * against the running kernel — a copy of the struct read at compile-time offsets
+ * would misread whichever layout it wasn't built against. */
+struct iov_iter___old {
+    const struct iovec *iov;
+};
+
+/* Only the rename needs a flavor; the guard is a CO-RE constant, so the branch
+ * for the layout we didn't load on is pruned before the verifier walks it. */
+static __always_inline const struct iovec *iter_iov(struct iov_iter *it)
+{
+    if (bpf_core_field_exists(struct iov_iter___old, iov))
+        return BPF_CORE_READ((struct iov_iter___old *) it, iov);
+    return BPF_CORE_READ(it, __iov);
+}
+
+static __always_inline struct iov_iter *msg_iter(struct msghdr *msg)
+{
+    return (void *) msg + bpf_core_field_offset(struct msghdr, msg_iter);
+}
+
 /* First data byte the iter points at: ITER_UBUF carries a bare user pointer;
  * ITER_IOVEC an array whose first element we follow. Other iter types (kvec /
  * bvec, kernel-internal) aren't user sendmsg/recvmsg payloads — skip them. */
 static __always_inline __u64 iter_base(struct msghdr *msg)
 {
-    struct iov_iter it;
-    if (bpf_core_read(&it, sizeof(it), &msg->msg_iter))
+    struct iov_iter *it = msg_iter(msg);
+    __u8 type = BPF_CORE_READ(it, iter_type);
+
+    if (type == bpf_core_enum_value(enum iter_type, ITER_UBUF))
+        return (__u64) BPF_CORE_READ(it, ubuf);
+    if (type != bpf_core_enum_value(enum iter_type, ITER_IOVEC))
         return 0;
-    if (it.iter_type == 0 /* ITER_UBUF */)
-        return (__u64) it.ubuf;
-    if (it.iter_type == 1 /* ITER_IOVEC */) {
-        struct iovec iov;
-        if (bpf_core_read(&iov, sizeof(iov), it.__iov))
-            return 0;
-        return (__u64) iov.iov_base;
-    }
-    return 0;
+    return (__u64) BPF_CORE_READ(iter_iov(it), iov_base);
 }
 
 /* int tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size) — the
@@ -176,23 +196,26 @@ int BPF_KPROBE(probe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, __u64 siz
 {
     if ((long) size <= 0)
         return 0;
-    struct iov_iter it;
-    if (bpf_core_read(&it, sizeof(it), &msg->msg_iter))
-        return 0;
-    if (it.iter_type == 0 /* ITER_UBUF */) {
-        emit_frame((__u64) sk, (__u64) it.ubuf, (__u32) it.count, DIR_WRITE);
+    struct iov_iter *it = msg_iter(msg);
+    __u8 type = BPF_CORE_READ(it, iter_type);
+
+    if (type == bpf_core_enum_value(enum iter_type, ITER_UBUF)) {
+        emit_frame((__u64) sk, (__u64) BPF_CORE_READ(it, ubuf),
+                   (__u32) BPF_CORE_READ(it, count), DIR_WRITE);
         return 0;
     }
-    if (it.iter_type != 1 /* only plain ITER_IOVEC */)
+    if (type != bpf_core_enum_value(enum iter_type, ITER_IOVEC)) /* only plain ITER_IOVEC */
         return 0;
-    const struct iovec *iov = it.__iov;
-    __u64 nr = it.nr_segs;
+    const struct iovec *iov = iter_iov(it);
+    __u64 nr = BPF_CORE_READ(it, nr_segs);
 #pragma unroll
     for (int i = 0; i < 8; i++) {
         if ((__u64) i >= nr)
             break;
         struct iovec v;
-        if (bpf_core_read(&v, sizeof(v), &iov[i]))
+        /* iov is a local pointer, so this is a plain kernel read — going through
+         * bpf_core_read would relocate the iovec deref as a field access. */
+        if (bpf_probe_read_kernel(&v, sizeof(v), &iov[i]))
             break;
         if (v.iov_len)
             emit_frame((__u64) sk, (__u64) v.iov_base, (__u32) v.iov_len, DIR_WRITE);
