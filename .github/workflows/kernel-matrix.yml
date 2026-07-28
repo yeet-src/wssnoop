@@ -139,9 +139,19 @@ jobs:
           pattern: kmatrix-*
 
       - name: Render matrix
+        id: render
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import csv, glob, os, re
+
+          # The gate step only sees the verify job's pass/fail, which can't tell a
+          # rejected program from a kernel that never built or booted. This step can,
+          # so it hands the gate the diagnosis to report.
+          def diagnose(reason):
+              out = os.environ.get("GITHUB_OUTPUT")
+              if out:
+                  with open(out, "a") as fh:
+                      fh.write(f"reason={reason}\n")
 
           # One CSV per kernel under results/kmatrix-<kernel>/result.csv.
           data, kernels, progs = {}, [], []
@@ -167,6 +177,7 @@ jobs:
 
           print("## 🐧 Kernel verification matrix\n")
           if not progs:
+              diagnose("no kernel produced a result: every build or boot failed")
               print("⚠️ No results were produced — check the per-kernel job logs.\n")
               raise SystemExit
           print("| Program | " + " | ".join(short(k) for k in kernels) + " |")
@@ -188,12 +199,23 @@ jobs:
           total = len(progs) * len([k for k in kernels if data[k] is not None])
           verb = "all programs loaded on every kernel" if fail == 0 else f"{fail} of {total} program×kernel checks failed"
           print(f"**{len(progs)} program(s) × {len(kernels)} kernel(s) — {verb}.**")
+
+          missing = [short(k) for k in kernels if data[k] is None]
+          why = []
+          if missing:
+              why.append(f"build or boot failed on {', '.join(missing)}")
+          if fail:
+              why.append(f"verifier rejected {fail} of {total} program/kernel checks")
+          diagnose("; ".join(why))
           PY
 
       - name: Gate on any rejection
+        env:
+          REASON: ${{ steps.render.outputs.reason }}
         run: |
-          # Fail the run if any per-kernel job failed (a rejection or a build/boot error).
-          if [ "${{ contains(needs.verify.result, 'failure') }}" = "true" ] || [ "${{ needs.verify.result }}" = "failure" ]; then
-            echo "::error::one or more kernels rejected a program (see the matrix summary)"
+          # Fail the run if any per-kernel job failed, reporting what the render step
+          # diagnosed — a rejection and a build/boot failure look identical from here.
+          if [ "${{ needs.verify.result }}" = "failure" ]; then
+            echo "::error::${REASON:-kernel verification failed (see the matrix summary)}"
             exit 1
           fi

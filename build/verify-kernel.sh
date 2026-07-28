@@ -49,7 +49,16 @@ if [ -n "${OUT_CSV:-}" ]; then
 fi
 
 # Drop the header row; fail if any program's verdict is not "success".
-if printf '%s\n' "$csv" | tail -n +2 | grep -q ',failure$'; then
+rejected="$(printf '%s\n' "$csv" | tail -n +2 | awk -F, '$5 == "failure" { print $2 }')"
+if [ -n "$rejected" ]; then
+	# A verdict alone doesn't say why. Re-run just the rejected programs with the
+	# verifier log on so the rejection is readable in the job output. Filter by
+	# program name against the same object list: veristat's CSV names the file by
+	# basename, which isn't a path we could hand back to it.
+	for p in $rejected; do
+		echo ">> verifier log for $p on kernel $KREL"
+		"$VERISTAT" -v -f "$p" "$@" 2>&1 || true
+	done
 	echo "::error::BPF verifier rejected a program on kernel $KREL" >&2
 	exit 1
 fi
